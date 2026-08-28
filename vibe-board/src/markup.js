@@ -1,0 +1,156 @@
+/* The SPA's static/index.html body, as a template string.
+
+   The extension has no HTML file of its own: Canvas hands us a bare container
+   and we fill it. Keeping this as one template (rather than hand-built DOM)
+   makes it easy to diff against static/index.html when that changes. */
+
+export const BOARD_MARKUP = `
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+    <span class="brand-text">
+      <span class="brand-name">vibe</span>
+      <span class="brand-sub">agent dispatch</span>
+    </span>
+  </div>
+
+  <div class="topbar-controls">
+    <div class="control control-workspace">
+      <select id="workspace-select" aria-label="Workspace"><option value="">Choose a workspace</option></select>
+    </div>
+    <div class="control" id="ctl-concurrency" hidden>
+      <label class="control-label" for="max-concurrent">Max agents</label>
+      <input id="max-concurrent" type="number" min="1" max="20" value="3">
+    </div>
+    <div class="control" id="ctl-pushmode" hidden>
+      <div class="seg" id="push-mode" role="group" aria-label="Where changes land">
+        <button type="button" data-mode="pr" class="seg-btn">Pull request</button>
+        <button type="button" data-mode="main" class="seg-btn">Push to main</button>
+      </div>
+    </div>
+    <button id="show-verified" class="ghost-btn toggle-verified" hidden>Show verified</button>
+    <div class="mgr-badge" id="mgr-badge" hidden role="button" tabindex="0"
+         title="Manager automation is watching this workspace&#10;Click to run the manager now">
+      <span class="pulse" id="mgr-dot"></span> <span id="mgr-text">manager</span>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+  <section id="api-setup" hidden>
+    <div class="empty-inner">
+      <p class="eyebrow">Board unavailable</p>
+      <h1>Can't reach the agent server</h1>
+      <p class="empty-copy">The board is stored on the agent server this Canvas backend is
+         connected to, so it needs to be running.</p>
+      <p class="api-setup-error" id="api-setup-error" hidden></p>
+      <button type="button" id="api-retry">Retry</button>
+    </div>
+  </section>
+
+  <section id="empty-state" hidden>
+    <div class="empty-inner">
+      <div class="empty-lanes" aria-hidden="true">
+        <span class="lane-swatch" data-lane="pending"></span>
+        <span class="lane-swatch" data-lane="in_progress"></span>
+        <span class="lane-swatch" data-lane="needs_input"></span>
+        <span class="lane-swatch" data-lane="finished"></span>
+      </div>
+      <p class="eyebrow">No workspace open</p>
+      <h1>Choose a workspace to open its board.</h1>
+      <p class="empty-copy">Each workspace gets a manager that checks the queue every minute, hands
+         work to agents in their own git worktrees, and moves cards across the board as they go.</p>
+    </div>
+  </section>
+
+  <section id="board-wrap" hidden>
+    <form id="new-ticket-form" class="desk" autocomplete="off">
+      <div class="desk-head">
+        <span class="eyebrow">New request</span>
+      </div>
+      <div class="ticket-form-row">
+        <textarea id="new-ticket-body" rows="2" aria-label="What should the agents build?"
+          placeholder="What should the agents build?"></textarea>
+        <div class="desk-actions">
+          <input type="file" id="new-ticket-file-input" multiple hidden>
+          <button type="button" id="new-ticket-attach" class="attach-btn" title="Attach files or images" aria-label="Attach files or images">
+            <span aria-hidden="true">📎</span>
+          </button>
+          <button type="submit" id="new-ticket-submit">Send request</button>
+        </div>
+      </div>
+      <div id="new-ticket-files" class="file-chips" hidden></div>
+    </form>
+
+    <div class="board" id="board">
+      <section class="col" data-status="pending" aria-label="Pending">
+        <div class="col-head">
+          <span class="col-name">Pending</span>
+          <span class="col-count"></span>
+        </div>
+        <div class="col-cards" data-status="pending"></div>
+      </section>
+      <section class="col" data-status="in_progress" aria-label="In progress">
+        <div class="col-head">
+          <span class="col-name">In progress</span>
+          <span class="col-count"></span>
+        </div>
+        <div class="col-cards" data-status="in_progress"></div>
+      </section>
+      <section class="col" data-status="needs_input" aria-label="Needs you">
+        <div class="col-head">
+          <span class="col-name">Needs you</span>
+          <span class="col-count"></span>
+        </div>
+        <div class="col-cards" data-status="needs_input"></div>
+      </section>
+      <section class="col" data-status="finished" aria-label="Finished">
+        <div class="col-head">
+          <span class="col-name">Finished</span>
+          <span class="col-count"></span>
+        </div>
+        <div class="col-cards" data-status="finished"></div>
+      </section>
+      <section class="col" data-status="verified" aria-label="Verified" hidden>
+        <div class="col-head">
+          <span class="col-name">Verified</span>
+          <span class="col-count"></span>
+        </div>
+        <div class="col-cards" data-status="verified"></div>
+      </section>
+    </div>
+  </section>
+</main>
+
+<aside id="drawer" hidden>
+  <div class="drawer-backdrop" id="drawer-backdrop"></div>
+  <div class="drawer-panel" role="dialog" aria-modal="true" aria-label="Request detail">
+    <div class="drawer-head">
+      <div class="drawer-headings">
+        <div class="drawer-meta">
+          <span class="drawer-status" id="drawer-status"></span>
+          <span class="drawer-id" id="drawer-id"></span>
+        </div>
+        <h2 class="drawer-title" id="drawer-title" hidden></h2>
+      </div>
+      <button class="drawer-close" id="drawer-close" aria-label="Close">✕</button>
+    </div>
+    <div class="drawer-links" id="drawer-links"></div>
+    <div class="drawer-note" id="drawer-note" hidden></div>
+    <div class="drawer-activity" id="drawer-activity" hidden></div>
+    <div class="drawer-attachments" id="drawer-attachments" hidden></div>
+    <div class="drawer-thread" id="drawer-thread"></div>
+    <form id="append-form">
+      <textarea id="append-body" rows="3" aria-label="Add to this request"
+        placeholder="Add to this request…"></textarea>
+      <div class="desk-actions">
+        <input type="file" id="drawer-file-input" multiple hidden>
+        <button type="button" id="drawer-attach" class="attach-btn" title="Attach files or images" aria-label="Attach files or images">
+          <span aria-hidden="true">📎</span>
+        </button>
+        <button type="submit">Add</button>
+      </div>
+    </form>
+  </div>
+</aside>
+`;
