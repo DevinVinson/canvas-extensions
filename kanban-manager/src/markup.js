@@ -2,7 +2,12 @@
 
    The extension has no HTML file of its own: Canvas hands us a bare container
    and we fill it. Keeping this as one template (rather than hand-built DOM)
-   makes it easy to diff against static/index.html when that changes. */
+   makes it easy to diff against static/index.html when that changes.
+
+   Two controls are extension-only and have no counterpart in index.html: the
+   #api-setup screen (the SPA is served by the API it talks to, so it never has
+   to explain that the backend is missing) and #mgr-stop (the SPA's manager
+   automation is created and owned by app.py, not by the browser). */
 
 export const BOARD_MARKUP = `
 <header class="topbar">
@@ -33,6 +38,8 @@ export const BOARD_MARKUP = `
          title="Manager automation is watching this workspace&#10;Click to run the manager now">
       <span class="pulse" id="mgr-dot"></span> <span id="mgr-text">manager</span>
     </div>
+    <button id="mgr-stop" class="ghost-btn mgr-stop" hidden
+            title="Disable the manager automation for this workspace">Stop manager</button>
   </div>
 </header>
 

@@ -19,10 +19,11 @@
 import { BOARD_MARKUP } from "./markup.js";
 import { Store } from "./store.js";
 import { Live } from "./live.js";
+import { Manager } from "./manager.js";
 
 const HOST_API_VERSION = "1";
 // Canvas routes extension pages at /extensions/<extension>/<declared page path>.
-const PAGE_ROOT = "/extensions/vibe-board/board";
+const PAGE_ROOT = "/extensions/kanban-manager/board";
 const STYLE_ELEMENT_ID = "vibe-ext-style";
 
 // Injected by build.mjs: the SPA stylesheet, scoped under .vibe-ext.
@@ -140,9 +141,11 @@ export function mountBoard({ container, path, navigate, host }) {
     return id;
   }
 
+  const store = new Store(host);
   const state = {
-    store: new Store(host),
+    store,
     live: new Live(host),
+    manager: new Manager(host, store),
     workspaces: { available: [], selected: [] },
     ws: null,
     tickets: [],
@@ -195,6 +198,7 @@ export function mountBoard({ container, path, navigate, host }) {
     $("#ctl-pushmode").hidden = true;
     $("#show-verified").hidden = true;
     $("#mgr-badge").hidden = true;
+    $("#mgr-stop").hidden = true;
     const err = $("#api-setup-error");
     err.hidden = !message;
     err.textContent = message || "";
@@ -328,7 +332,7 @@ export function mountBoard({ container, path, navigate, host }) {
       for (const a of avail) {
         const o = document.createElement("option");
         o.value = a.path;
-        o.textContent = `${a.name}${a.is_git ? "" : "  (not git)"}`;
+        o.textContent = a.name;
         og.appendChild(o);
       }
       sel.appendChild(og);
@@ -401,9 +405,14 @@ export function mountBoard({ container, path, navigate, host }) {
 
   async function refreshBoard() {
     if (!state.ws) return;
+    /* A poll reads the board every 5s, so one is often in flight while the
+       user submits. Its response was captured before the write and would
+       render the board without the new card; the write does its own refresh,
+       so drop anything read across a write instead. */
+    const writes = state.store.writes;
     try {
       const data = await state.store.getBoard(state.ws.id);
-      if (!alive()) return;
+      if (!alive() || state.store.writes !== writes) return;
       state.ws = data.workspace;
       /* The old service computed these server-side; inside Canvas they come
          from the agent server directly, cached and refreshed in the
@@ -446,6 +455,14 @@ export function mountBoard({ container, path, navigate, host }) {
     if (alive()) renderMgrBadge();
   }
 
+  /* No manager for this workspace: it was never created, it was stopped, or
+     the automation it points at is gone. All three are the same offer to the
+     user — start one — so they share a predicate. */
+  function needsStart() {
+    const a = state.automation;
+    return !state.ws?.automation_id || a?.missing === true || a?.enabled === false;
+  }
+
   async function triggerManager() {
     if (!state.ws || !state.ws.automation_id) return;
     const badge = $("#mgr-badge");
@@ -462,17 +479,67 @@ export function mountBoard({ container, path, navigate, host }) {
     refreshAutomation();
   }
 
+  /* Creates the automation the SPA used to get from app.py's bootstrap, then
+     records its id on the workspace so every other reader (the badge, the
+     manager's own CLI) finds it. */
+  async function startManager() {
+    const badge = $("#mgr-badge");
+    if (!state.ws || badge.classList.contains("triggering")) return;
+    badge.classList.add("triggering");
+    $("#mgr-text").textContent = "manager: starting…";
+    try {
+      const automationId = await state.manager.ensure(state.ws);
+      if (!alive()) return;
+      state.ws = await state.store.updateWorkspace(state.ws.id, {
+        automation_id: automationId,
+      });
+      state.automation = null;
+    } catch (e) {
+      if (alive()) console.error(`manager start failed: ${e.message}`);
+    }
+    if (!alive()) return;
+    badge.classList.remove("triggering");
+    await refreshAutomation();
+  }
+
+  async function stopManager() {
+    const button = $("#mgr-stop");
+    if (!state.ws?.automation_id || button.classList.contains("working")) return;
+    button.classList.add("working");
+    try {
+      await state.manager.stop(state.ws.automation_id);
+    } catch (e) {
+      if (alive()) console.error(`manager stop failed: ${e.message}`);
+    }
+    if (!alive()) return;
+    button.classList.remove("working");
+    await refreshAutomation();
+  }
+
   function renderMgrBadge() {
     const badge = $("#mgr-badge");
-    if (!state.ws || !state.ws.automation_id) {
+    const stop = $("#mgr-stop");
+    if (!state.ws) {
       badge.hidden = true;
+      stop.hidden = true;
       return;
     }
     badge.hidden = false;
-    badge.classList.remove("ok", "err", "paused");
+    badge.classList.remove("ok", "err", "paused", "start");
     const a = state.automation;
     const text = $("#mgr-text");
+    // A start/trigger in flight owns the label until it finishes.
     if (badge.classList.contains("triggering")) return;
+    if (needsStart()) {
+      stop.hidden = true;
+      badge.classList.add("start");
+      text.textContent = "Start manager";
+      badge.title = state.ws.automation_id
+        ? "The manager automation is stopped\nClick to start it again"
+        : "No manager is watching this workspace\nClick to create the manager automation";
+      return;
+    }
+    stop.hidden = false;
     if (!a || a.automation_id !== state.ws.automation_id) {
       text.textContent = "manager";
       badge.title = `Manager automation is watching this workspace\n${TRIGGER_HINT}`;
@@ -495,10 +562,6 @@ export function mountBoard({ container, path, navigate, host }) {
       label = "manager: unknown";
       cls = "err";
       tip.push(a.error);
-    } else if (a.enabled === false) {
-      label = "manager: paused";
-      cls = "paused";
-      tip.push("Automation is disabled");
     } else if (runsFailing) {
       label = `manager ✗ ${lastWhen}`;
       cls = "err";
@@ -1048,13 +1111,17 @@ export function mountBoard({ container, path, navigate, host }) {
     on($("#show-verified"), "click", toggleVerified);
     renderVerifiedToggle();
 
-    on($("#mgr-badge"), "click", triggerManager);
+    // One control, two jobs: start the manager when there isn't one, run it
+    // now when there is.
+    const badgeAction = () => (needsStart() ? startManager() : triggerManager());
+    on($("#mgr-badge"), "click", badgeAction);
     on($("#mgr-badge"), "keydown", (e) => {
       if (e.key === "Enter" || e.key === " ") {
         e.preventDefault();
-        triggerManager();
+        badgeAction();
       }
     });
+    on($("#mgr-stop"), "click", stopManager);
     applyTheme();
   }
 
@@ -1105,7 +1172,7 @@ export function mountBoard({ container, path, navigate, host }) {
 export function activate(host) {
   if (host.apiVersion !== HOST_API_VERSION) {
     throw new Error(
-      `vibe-board requires Canvas host API ${HOST_API_VERSION}, got ${host.apiVersion}.`,
+      `kanban-manager requires Canvas host API ${HOST_API_VERSION}, got ${host.apiVersion}.`,
     );
   }
   // The page id is written as a literal (rather than the PAGE_ID constant) so

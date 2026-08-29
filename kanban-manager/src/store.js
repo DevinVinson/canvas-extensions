@@ -9,9 +9,11 @@
    and one board.json per workspace holding its tickets with entries and
    attachments embedded.
 
-   Writes are read-modify-write of a whole board document. This is a
-   single-user tool and the previous SQLite backend serialized these; see
-   SCHEMA.md for why that trade is acceptable here. */
+   Writes are read-modify-write of a whole document, and the browser is not
+   the only writer: the automation and the manager's CLI write the same files
+   from the shell, where no lock can span the file API. Every write therefore
+   carries a `rev` and a `writer` token, and `mutateDoc` re-applies the
+   mutation when another writer got in — see SCHEMA.md. */
 
 /* The store lives under the agent-server user's home. The file API needs
    absolute paths and does not expand "~", so the home directory is resolved
@@ -30,6 +32,13 @@ export function newId() {
 
 export function nowTs() {
   return Date.now() / 1000;
+}
+
+/* Stamp a document for the next write: `rev` counts writes so a racing writer
+   is detectable, `writer` identifies this one so we can tell our own write
+   from someone else's. Both are read by the shell side too (vibestore.py). */
+export function stamp(doc, fields) {
+  return { ...doc, ...fields, rev: (doc.rev || 0) + 1, writer: newId() };
 }
 
 /* The file API keeps `filename` in a query param and writes it verbatim, so
@@ -69,6 +78,29 @@ export class Store {
     this.host = host;
     this.root = root;
     this.rootPromise = null;
+    this.mutationChain = Promise.resolve();
+    /* Completed board writes. The UI reads this to tell a poll response that
+       predates a local write from one that reflects it. */
+    this.writes = 0;
+  }
+
+  /* Run a read-modify-write cycle with no other cycle in flight.
+
+     A cycle is a download, an in-memory edit and an upload of the whole
+     document, which takes long enough that a second one started meanwhile
+     (a second submit, an attachment, a drag-reorder) downloads the document
+     from *before* the first upload and then writes that stale copy back —
+     silently dropping the ticket just created. There is no compare-and-set in
+     the file API, so for our own writes the fix is not to overlap them; the
+     writers outside this tab are caught by `mutateDoc` instead.
+
+     `fn` must not call `serialize` again; the helpers it uses (readBoard,
+     writeBoard, readIndex, writeIndex) are deliberately unserialized. */
+  serialize(fn) {
+    const done = this.mutationChain.then(fn);
+    // A rejected cycle must not poison the queue, nor look unhandled here.
+    this.mutationChain = done.then(() => {}, () => {});
+    return done;
   }
 
   /** Absolute store root, resolved from the agent server's home dir once. */
@@ -158,6 +190,28 @@ export class Store {
     }), path.split("/").pop());
   }
 
+  /* Read, apply `mutate`, write back — retrying when another writer lands in
+     between. Both checks are needed: the file API offers no conditional
+     upload, so a race is detected rather than prevented. Re-reading before
+     the upload catches a write that arrived while we were preparing ours
+     (theirs would otherwise be overwritten); re-reading after it catches a
+     writer that had already read the pre-change document and overwrote us
+     (our ticket would otherwise be silently dropped). */
+  async mutateDoc(path, read, write, mutate, attempts = 5) {
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      const doc = await read();
+      const base = doc.rev || 0;
+      const result = mutate(doc);
+      const current = await read();
+      if ((current.rev || 0) !== base) continue;
+      const token = await write(doc);
+      const after = await read();
+      // `rev > base + 1` means someone built on top of our write, so it landed.
+      if (after.writer === token || (after.rev || 0) > base + 1) return result;
+    }
+    throw new Error(`${path.split("/").pop()} is being written concurrently; try again`);
+  }
+
   async writeFile(path, blob, filename) {
     const dir = path.slice(0, path.lastIndexOf("/"));
     await this.host.agentServer.request({
@@ -180,8 +234,21 @@ export class Store {
     return idx && Array.isArray(idx.workspaces) ? idx : { version: 1, workspaces: [] };
   }
 
+  /** Writes the index and returns the token that identifies this write. */
   async writeIndex(index) {
-    await this.writeJson(await this.indexPath(), { ...index, version: 1 });
+    const stamped = stamp(index, { version: 1 });
+    await this.writeJson(await this.indexPath(), stamped);
+    return stamped.writer;
+  }
+
+  async mutateIndex(mutate) {
+    const path = await this.indexPath();
+    return this.serialize(() => this.mutateDoc(
+      path,
+      () => this.readIndex(),
+      (index) => this.writeIndex(index),
+      mutate,
+    ));
   }
 
   /** Selected workspaces plus the candidates the agent server knows about. */
@@ -220,33 +287,38 @@ export class Store {
   }
 
   async selectWorkspace(path) {
-    const index = await this.readIndex();
-    const existing = index.workspaces.find((w) => w.path === path);
+    const existing = (await this.readIndex()).workspaces.find((w) => w.path === path);
     if (existing) return existing;
 
-    const ws = {
-      id: newId(),
-      path,
-      name: path.split("/").filter(Boolean).pop() || path,
-      max_concurrent: 2,
-      push_mode: "main",
-      automation_id: null,
-      manager_conversation_id: null,
-      created_at: nowTs(),
-    };
-    index.workspaces.push(ws);
-    await this.writeIndex(index);
-    await this.writeBoard(ws.id, { version: 1, workspace_id: ws.id, tickets: [] });
+    let created = false;
+    const ws = await this.mutateIndex((index) => {
+      const already = index.workspaces.find((w) => w.path === path);
+      created = !already;
+      if (already) return already;
+      const fresh = {
+        id: newId(),
+        path,
+        name: path.split("/").filter(Boolean).pop() || path,
+        max_concurrent: 2,
+        push_mode: "main",
+        automation_id: null,
+        manager_conversation_id: null,
+        created_at: nowTs(),
+      };
+      index.workspaces.push(fresh);
+      return fresh;
+    });
+    if (created) await this.writeBoard(ws.id, { version: 1, workspace_id: ws.id, tickets: [] });
     return ws;
   }
 
   async updateWorkspace(wsId, patch) {
-    const index = await this.readIndex();
-    const ws = index.workspaces.find((w) => w.id === wsId);
-    if (!ws) throw new Error("workspace not found");
-    Object.assign(ws, patch);
-    await this.writeIndex(index);
-    return ws;
+    return this.mutateIndex((index) => {
+      const ws = index.workspaces.find((w) => w.id === wsId);
+      if (!ws) throw new Error("workspace not found");
+      Object.assign(ws, patch);
+      return ws;
+    });
   }
 
   // ------------------------------------------------------------------ boards
@@ -257,18 +329,25 @@ export class Store {
     return { ...board, tickets: board.tickets || [] };
   }
 
+  /** Writes the board and returns the token that identifies this write. */
   async writeBoard(wsId, board) {
-    await this.writeJson(await this.boardPath(wsId), {
-      ...board, version: 1, workspace_id: wsId,
-    });
+    const stamped = stamp(board, { version: 1, workspace_id: wsId });
+    await this.writeJson(await this.boardPath(wsId), stamped);
+    this.writes += 1;
+    return stamped.writer;
   }
 
-  /** Read, apply `mutate`, write back. Returns whatever `mutate` returns. */
+  /** Read, apply `mutate`, write back. Returns whatever `mutate` returns.
+      Serialized against our own cycles, and retried against everyone else's:
+      see `serialize` and `mutateDoc`. */
   async mutateBoard(wsId, mutate) {
-    const board = await this.readBoard(wsId);
-    const result = mutate(board);
-    await this.writeBoard(wsId, board);
-    return result;
+    const path = await this.boardPath(wsId);
+    return this.serialize(() => this.mutateDoc(
+      path,
+      () => this.readBoard(wsId),
+      (board) => this.writeBoard(wsId, board),
+      mutate,
+    ));
   }
 
   async getBoard(wsId) {

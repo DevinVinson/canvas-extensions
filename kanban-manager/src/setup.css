@@ -1,6 +1,7 @@
-/* Styles for the API-setup screen, which exists only in the extension build
-   (the standalone SPA is served by the API, so it never has to ask where it
-   is). Appended after the scoped SPA stylesheet, using the same tokens.
+/* Styles for the parts that exist only in the extension build: the API-setup
+   screen (the standalone SPA is served by the API, so it never has to ask
+   where it is) and the manager start/stop control (the SPA's automation is
+   created by app.py). Appended after the scoped SPA stylesheet, same tokens.
 
    These selectors are written pre-scoped: build.mjs runs the SPA stylesheet
    through the prefixer, then concatenates this file, so everything here must
@@ -57,3 +58,17 @@
   max-width: 34rem;
 }
 .vibe-ext .api-setup-error[hidden] { display: none; }
+
+/* The manager control. Orange (--flare, the board's one attention colour)
+   means "no manager is running here" — the automation does not exist yet, or
+   it was stopped — and the badge becomes the button that starts it. */
+.vibe-ext .mgr-badge.start {
+  color: var(--flare);
+  border-color: var(--flare-ring);
+  background: rgba(255, 122, 69, .12);
+}
+.vibe-ext .mgr-badge.start:hover { border-color: var(--flare); }
+.vibe-ext .mgr-badge.start .pulse { animation: none; }
+
+.vibe-ext .mgr-stop[hidden] { display: none; }
+.vibe-ext .mgr-stop.working { opacity: .55; pointer-events: none; }

@@ -9,6 +9,8 @@
    (the ingress routes /api/automation to it), so it needs no separate
    credentials — this is exactly how Canvas's own automation client works. */
 
+import { isNotFound } from "./store.js";
+
 const AUTOMATION_BASE = "/api/automation/v1";
 
 /** Cache with a TTL; `sticky` entries are never refetched once known. */
@@ -67,6 +69,10 @@ export class Live {
       last_finished_run: null,
       consecutive_failures: 0,
       manager_conversation: null,
+      // The workspace names an automation the backend doesn't have (deleted
+      // out from under us). The UI offers to start a new one rather than
+      // reporting a health problem it cannot act on.
+      missing: false,
       error: null,
     };
     if (!automationId) return out;
@@ -98,8 +104,9 @@ export class Live {
         out.consecutive_failures = streak;
       }
     } catch (err) {
+      if (isNotFound(err)) out.missing = true;
       // Degrade to "unknown" rather than breaking the badge.
-      out.error = `automation backend unreachable: ${err.message}`;
+      else out.error = `automation backend unreachable: ${err.message}`;
     }
 
     const convId = workspace?.manager_conversation_id;
