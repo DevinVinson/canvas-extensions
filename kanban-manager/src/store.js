@@ -6,14 +6,20 @@
    credentials to manage, and no cross-origin request to be blocked.
 
    Layout is documented in store/SCHEMA.md: an index.json listing workspaces,
-   and one board.json per workspace holding its tickets with entries and
-   attachments embedded.
+   and one file per ticket under workspaces/<ws>/tickets/<id>/ticket.json.
 
-   Writes are read-modify-write of a whole document, and the browser is not
-   the only writer: the automation and the manager's CLI write the same files
-   from the shell, where no lock can span the file API. Every write therefore
-   carries a `rev` and a `writer` token, and `mutateDoc` re-applies the
-   mutation when another writer got in — see SCHEMA.md. */
+   Tickets are stored per file because the browser is not the only writer —
+   the automation and the manager's CLI write from the shell, where no lock
+   spans the file API, and the API has no conditional upload to build a
+   compare-and-swap on (a stale If-Match is accepted, not rejected). While the
+   whole board was one document, any two writers collided: measured 35/40
+   concurrent UI+manager writes silently lost the manager's edit, and adding
+   rev/writer tokens only reduced that to 8/40 because a writer can confirm
+   its own write landed without noticing it destroyed someone else's. Giving
+   each ticket its own file removes the shared document, so edits to different
+   tickets cannot collide at all. Documents that remain shared (index.json,
+   and a ticket against itself) still carry `rev`/`writer` and go through
+   `mutateDoc`. */
 
 /* The store lives under the agent-server user's home. The file API needs
    absolute paths and does not expand "~", so the home directory is resolved
@@ -23,6 +29,15 @@ export const STORE_SUBPATH = ".openhands/vibe-manager";
 
 export const STATUSES = ["pending", "in_progress", "needs_input", "finished"];
 export const VERIFIED = "verified";
+
+/* Primary colour of a workspace's theme, stored on its index.json record. The
+   palette lives in the stylesheet (--accent-<id>); this is only the fallback
+   for records written before the field existed. */
+export const DEFAULT_ACCENT = "ember";
+
+/* Spend cap (USD) a new request gets unless the user changes it. The
+   automation enforces it by watching the worker conversation's cost. */
+export const DEFAULT_BUDGET = 10;
 
 export function newId() {
   const bytes = new Uint8Array(6);
@@ -39,6 +54,14 @@ export function nowTs() {
    from someone else's. Both are read by the shell side too (vibestore.py). */
 export function stamp(doc, fields) {
   return { ...doc, ...fields, rev: (doc.rev || 0) + 1, writer: newId() };
+}
+
+/* Tickets come back in directory-listing order, so the board imposes its own.
+   `sort_order` is assigned per column by drag-to-reorder; created_at breaks
+   ties, which is what makes a stale sort_order on a new ticket harmless. */
+export function byPriority(a, b) {
+  const order = (a.sort_order || 0) - (b.sort_order || 0);
+  return order !== 0 ? order : (a.created_at || 0) - (b.created_at || 0);
 }
 
 /* The file API keeps `filename` in a query param and writes it verbatim, so
@@ -95,7 +118,7 @@ export class Store {
      writers outside this tab are caught by `mutateDoc` instead.
 
      `fn` must not call `serialize` again; the helpers it uses (readBoard,
-     writeBoard, readIndex, writeIndex) are deliberately unserialized. */
+     writeTicket, readIndex, writeIndex) are deliberately unserialized. */
   serialize(fn) {
     const done = this.mutationChain.then(fn);
     // A rejected cycle must not poison the queue, nor look unhandled here.
@@ -132,6 +155,42 @@ export class Store {
     return `${await this.storeRoot()}/workspaces/${wsId}/board.json`;
   }
 
+  async ticketsDir(wsId) {
+    return `${await this.storeRoot()}/workspaces/${wsId}/tickets`;
+  }
+
+  /* Each ticket is a DIRECTORY holding ticket.json, not a bare file: the file
+     API can enumerate subdirectories (search_subdirs) but has no endpoint that
+     lists files, so this is the only shape the board can be rebuilt from. */
+  async ticketPath(wsId, ticketId) {
+    return `${await this.ticketsDir(wsId)}/${ticketId}/ticket.json`;
+  }
+
+  /** Ticket ids present on disk, via the only listing endpoint there is. */
+  async listTicketIds(wsId) {
+    const dir = await this.ticketsDir(wsId);
+    const ids = [];
+    let pageId = null;
+    do {
+      /* Cache-busted like readJson: a cached listing would omit a ticket
+         directory created moments ago, which is precisely the "my card never
+         showed up" symptom this layout exists to fix. */
+      const query = new URLSearchParams({ path: dir, limit: "100", _: Date.now() });
+      if (pageId) query.set("page_id", pageId);
+      let page;
+      try {
+        page = await this.readJsonResponse(`/api/file/search_subdirs?${query}`);
+      } catch (err) {
+        // No tickets/ dir yet: pre-migration workspace, or one with no tickets.
+        if (isNotFound(err)) return null;
+        throw err;
+      }
+      for (const item of page.items || []) ids.push(item.name);
+      pageId = page.next_page_id || null;
+    } while (pageId);
+    return ids;
+  }
+
   async attachmentPath(attId, filename) {
     return `${await this.storeRoot()}/attachments/${attId}/${filename}`;
   }
@@ -155,6 +214,14 @@ export class Store {
   }
 
   // ---------------------------------------------------------------- file API
+
+  /** GET a JSON API response (not a stored file). */
+  async readJsonResponse(path) {
+    const raw = await this.host.agentServer.request({
+      path, headers: { "Cache-Control": "no-cache" },
+    });
+    return typeof raw === "string" ? JSON.parse(raw) : raw;
+  }
 
   async readJson(path, fallback) {
     let raw;
@@ -182,6 +249,13 @@ export class Store {
     } catch (err) {
       throw new Error(`corrupt JSON at ${path}: ${err.message}`);
     }
+  }
+
+  async createDirectory(path) {
+    await this.host.agentServer.request({
+      path: `/api/file/create_directory?path=${encodeURIComponent(path)}`,
+      method: "POST",
+    });
   }
 
   async writeJson(path, payload) {
@@ -301,6 +375,7 @@ export class Store {
         name: path.split("/").filter(Boolean).pop() || path,
         max_concurrent: 2,
         push_mode: "main",
+        accent: DEFAULT_ACCENT,
         automation_id: null,
         manager_conversation_id: null,
         created_at: nowTs(),
@@ -308,7 +383,9 @@ export class Store {
       index.workspaces.push(fresh);
       return fresh;
     });
-    if (created) await this.writeBoard(ws.id, { version: 1, workspace_id: ws.id, tickets: [] });
+    // Create tickets/ up front so listing an empty board returns [] (a 404
+    // means "not migrated yet" and would send readBoard down the legacy path).
+    if (created) await this.createDirectory(await this.ticketsDir(ws.id));
     return ws;
   }
 
@@ -323,31 +400,67 @@ export class Store {
 
   // ------------------------------------------------------------------ boards
 
+  /* Rebuild the board by listing tickets/ and reading each ticket.json. Reads
+     run in parallel; a ticket that vanishes mid-read (deleted between the list
+     and the download) is skipped rather than failing the whole board. */
   async readBoard(wsId) {
-    const board = await this.readJson(await this.boardPath(wsId), null);
-    if (!board) return { version: 1, workspace_id: wsId, tickets: [] };
-    return { ...board, tickets: board.tickets || [] };
+    const ids = await this.listTicketIds(wsId);
+    if (ids === null) return this.readLegacyBoard(wsId);
+    const tickets = await Promise.all(
+      ids.map((id) => this.readTicket(wsId, id).catch((err) => {
+        if (isNotFound(err)) return null;
+        throw err;
+      })),
+    );
+    return {
+      version: 2,
+      workspace_id: wsId,
+      tickets: tickets.filter(Boolean).sort(byPriority),
+    };
   }
 
-  /** Writes the board and returns the token that identifies this write. */
-  async writeBoard(wsId, board) {
-    const stamped = stamp(board, { version: 1, workspace_id: wsId });
-    await this.writeJson(await this.boardPath(wsId), stamped);
+  /* Workspaces written before the per-ticket split still have a board.json.
+     Reading it keeps them working until `migrateWorkspace` splits them. */
+  async readLegacyBoard(wsId) {
+    const board = await this.readJson(await this.boardPath(wsId), null);
+    if (!board) return { version: 2, workspace_id: wsId, tickets: [] };
+    return { ...board, tickets: (board.tickets || []).sort(byPriority) };
+  }
+
+  async readTicket(wsId, ticketId) {
+    return this.readJson(await this.ticketPath(wsId, ticketId), null);
+  }
+
+  /** Writes one ticket and returns the token identifying this write. */
+  async writeTicket(wsId, ticket) {
+    const stamped = stamp(ticket, {});
+    await this.writeJson(await this.ticketPath(wsId, ticket.id), stamped);
     this.writes += 1;
     return stamped.writer;
   }
 
-  /** Read, apply `mutate`, write back. Returns whatever `mutate` returns.
-      Serialized against our own cycles, and retried against everyone else's:
-      see `serialize` and `mutateDoc`. */
-  async mutateBoard(wsId, mutate) {
-    const path = await this.boardPath(wsId);
+  /* Read, mutate, write back a SINGLE ticket. Two writers touching different
+     tickets no longer share a document, so they cannot lose each other's work;
+     `mutateDoc` still guards the case where both touch the same ticket. */
+  async mutateTicket(wsId, ticketId, mutate) {
+    const path = await this.ticketPath(wsId, ticketId);
     return this.serialize(() => this.mutateDoc(
       path,
-      () => this.readBoard(wsId),
-      (board) => this.writeBoard(wsId, board),
+      async () => {
+        const ticket = await this.readTicket(wsId, ticketId);
+        if (!ticket) throw new Error("ticket not found");
+        return ticket;
+      },
+      (ticket) => this.writeTicket(wsId, ticket),
       mutate,
     ));
+  }
+
+  /* Create is not a mutation of an existing document: the id is fresh, so no
+     other writer can be holding this path and there is nothing to race. */
+  async putNewTicket(wsId, ticket) {
+    await this.writeTicket(wsId, ticket);
+    return ticket;
   }
 
   async getBoard(wsId) {
@@ -358,32 +471,46 @@ export class Store {
 
   // ----------------------------------------------------------------- tickets
 
-  async createTicket(wsId, body) {
+  /* A new ticket goes to the bottom of pending. Serialized so two submits from
+     this tab pick different slots; a writer outside the tab could still pick
+     the same one, which is harmless — `sort_order` only orders a column, and
+     byPriority breaks ties on created_at.
+     `settings` carries the new-request choices: {llm_profile, max_budget}.
+     A null profile is "manager's choice" — the manager keeps picking. */
+  async createTicket(wsId, body, settings = {}) {
     const text = (body || "").trim();
     if (!text) throw new Error("empty ticket body");
+    const budget = Number(settings.max_budget ?? DEFAULT_BUDGET);
+    if (!(budget > 0)) throw new Error("max_budget must be positive");
+    return this.serialize(() => this.createTicketNow(wsId, text, {
+      llm_profile: settings.llm_profile || null,
+      max_budget: budget,
+    }));
+  }
+
+  async createTicketNow(wsId, text, settings) {
     const now = nowTs();
-    return this.mutateBoard(wsId, (board) => {
-      const maxOrder = board.tickets
-        .filter((t) => t.status === "pending")
-        .reduce((max, t) => Math.max(max, t.sort_order || 0), 0);
-      const ticket = {
-        id: newId(),
-        status: "pending",
-        title: null,
-        sort_order: maxOrder + 1,
-        conversation_id: null,
-        pr_url: null,
-        manager_note: null,
-        dispatched_entry_count: 0,
-        created_at: now,
-        updated_at: now,
-        finished_at: null,
-        verified_at: null,
-        entries: [{ id: newId(), author: "user", body: text, created_at: now }],
-        attachments: [],
-      };
-      board.tickets.push(ticket);
-      return ticket;
+    const board = await this.readBoard(wsId);
+    const maxOrder = board.tickets
+      .filter((t) => t.status === "pending")
+      .reduce((max, t) => Math.max(max, t.sort_order || 0), 0);
+    return this.putNewTicket(wsId, {
+      id: newId(),
+      status: "pending",
+      title: null,
+      sort_order: maxOrder + 1,
+      conversation_id: null,
+      pr_url: null,
+      manager_note: null,
+      dispatched_entry_count: 0,
+      llm_profile: settings.llm_profile,
+      max_budget: settings.max_budget,
+      created_at: now,
+      updated_at: now,
+      finished_at: null,
+      verified_at: null,
+      entries: [{ id: newId(), author: "user", body: text, created_at: now }],
+      attachments: [],
     });
   }
 
@@ -391,18 +518,20 @@ export class Store {
     const text = (body || "").trim();
     if (!text) throw new Error("empty entry body");
     const now = nowTs();
-    return this.mutateBoard(wsId, (board) => {
-      const ticket = board.tickets.find((t) => t.id === ticketId);
-      if (!ticket) throw new Error("ticket not found");
+    /* Read the pending tail BEFORE entering the serialized mutation: reopening
+       needs it, and `mutateTicket` serializes, so reading inside would
+       deadlock on our own queue. */
+    const board = await this.readBoard(wsId);
+    const maxOrder = board.tickets
+      .filter((t) => t.status === "pending")
+      .reduce((max, t) => Math.max(max, t.sort_order || 0), 0);
+    return this.mutateTicket(wsId, ticketId, (ticket) => {
       ticket.entries.push({ id: newId(), author, body: text, created_at: now });
       ticket.updated_at = now;
       // A new user request reopens a finished/needs_input ticket immediately
       // (bottom of pending) instead of waiting for the manager cycle.
       // in_progress is left alone (a worker is running); verified is terminal.
       if (author === "user" && (ticket.status === "finished" || ticket.status === "needs_input")) {
-        const maxOrder = board.tickets
-          .filter((t) => t.status === "pending")
-          .reduce((max, t) => Math.max(max, t.sort_order || 0), 0);
         ticket.status = "pending";
         ticket.sort_order = maxOrder + 1;
       }
@@ -412,9 +541,7 @@ export class Store {
 
   async verifyTicket(wsId, ticketId) {
     const now = nowTs();
-    return this.mutateBoard(wsId, (board) => {
-      const ticket = board.tickets.find((t) => t.id === ticketId);
-      if (!ticket) throw new Error("ticket not found");
+    return this.mutateTicket(wsId, ticketId, (ticket) => {
       ticket.status = VERIFIED;
       ticket.verified_at = now;
       ticket.updated_at = now;
@@ -422,14 +549,21 @@ export class Store {
     });
   }
 
+  /* Reordering writes one file per moved card. Only tickets whose sort_order
+     actually changed are written, so dragging within a column does not rewrite
+     the whole board and cannot clobber a concurrent edit to a card that
+     happened to sit in it. */
   async reorder(wsId, status, orderedIds) {
     if (!STATUSES.includes(status)) throw new Error("bad status");
-    return this.mutateBoard(wsId, (board) => {
-      orderedIds.forEach((id, idx) => {
-        const ticket = board.tickets.find((t) => t.id === id && t.status === status);
-        if (ticket) ticket.sort_order = idx;
-      });
-    });
+    const board = await this.readBoard(wsId);
+    const current = new Map(board.tickets.map((t) => [t.id, t]));
+    const moved = orderedIds
+      .map((id, idx) => ({ id, idx, ticket: current.get(id) }))
+      .filter(({ idx, ticket }) =>
+        ticket && ticket.status === status && (ticket.sort_order || 0) !== idx);
+    for (const { id, idx } of moved) {
+      await this.mutateTicket(wsId, id, (ticket) => { ticket.sort_order = idx; });
+    }
   }
 
   // ------------------------------------------------------------- attachments
@@ -439,9 +573,7 @@ export class Store {
     const filename = safeFilename(file.name);
     const path = await this.attachmentPath(attId, filename);
     await this.writeFile(path, file, filename);
-    return this.mutateBoard(wsId, (board) => {
-      const ticket = board.tickets.find((t) => t.id === ticketId);
-      if (!ticket) throw new Error("ticket not found");
+    return this.mutateTicket(wsId, ticketId, (ticket) => {
       const attachment = {
         id: attId,
         filename,

@@ -180,25 +180,82 @@ def board_path(ws_id: str) -> Path:
     return store_root() / "workspaces" / ws_id / "board.json"
 
 
+def tickets_dir(ws_id: str) -> Path:
+    return store_root() / "workspaces" / ws_id / "tickets"
+
+
+def ticket_path(ws_id: str, ticket_id: str) -> Path:
+    """One directory per ticket; see store.js for why it is a dir, not a file."""
+    return tickets_dir(ws_id) / ticket_id / "ticket.json"
+
+
+def _by_priority(ticket: dict) -> tuple:
+    return (ticket.get("sort_order") or 0, ticket.get("created_at") or 0)
+
+
 def read_board(ws_id: str) -> dict:
-    board = _read_json(board_path(ws_id), {"version": 1, "workspace_id": ws_id, "tickets": []})
-    board.setdefault("tickets", [])
-    return board
+    """Rebuild the board from the per-ticket files.
+
+    Falls back to a pre-split board.json so a workspace that has not been
+    migrated yet still reads correctly.
+    """
+    directory = tickets_dir(ws_id)
+    if not directory.is_dir():
+        board = _read_json(
+            board_path(ws_id), {"version": 2, "workspace_id": ws_id, "tickets": []}
+        )
+        board.setdefault("tickets", [])
+        board["tickets"].sort(key=_by_priority)
+        return board
+
+    tickets = []
+    for entry in directory.iterdir():
+        if not entry.is_dir():
+            continue
+        ticket = _read_json(entry / "ticket.json", None)
+        if ticket:
+            tickets.append(ticket)
+    tickets.sort(key=_by_priority)
+    return {"version": 2, "workspace_id": ws_id, "tickets": tickets}
 
 
-def write_board(ws_id: str, board: dict) -> str:
-    """Write the board and return the token identifying this write."""
-    stamped = _stamp(board, version=1, workspace_id=ws_id)
-    _write_json(board_path(ws_id), stamped)
+def write_board(ws_id: str, board: dict) -> None:
+    """Write a whole board out as per-ticket files.
+
+    No longer a single document write, so it carries no revision token: it is
+    used to seed or migrate a board, never to land a concurrent edit.
+    """
+    for ticket in board.get("tickets", []):
+        write_ticket(ws_id, ticket)
+
+
+def read_ticket(ws_id: str, ticket_id: str) -> dict | None:
+    return _read_json(ticket_path(ws_id, ticket_id), None)
+
+
+def write_ticket(ws_id: str, ticket: dict) -> str:
+    """Write one ticket and return the token identifying this write."""
+    stamped = _stamp(ticket)
+    _write_json(ticket_path(ws_id, ticket["id"]), stamped)
     return stamped["writer"]
 
 
-def mutate_board(ws_id: str, mutate):
-    """Read, apply `mutate`, write back. Returns whatever `mutate` returns."""
+def mutate_ticket(ws_id: str, ticket_id: str, mutate):
+    """Read-modify-write a single ticket file.
+
+    Writers touching different tickets no longer share a document, so the
+    manager patching one card cannot drop a card the user added meanwhile.
+    """
+    def read() -> dict:
+        ticket = read_ticket(ws_id, ticket_id)
+        if ticket is None:
+            raise KeyError(f"ticket {ticket_id} not found")
+        return ticket
+
     return _mutate_document(
-        board_path(ws_id),
-        lambda: read_board(ws_id),
-        lambda board: write_board(ws_id, board),
+        ticket_path(ws_id, ticket_id),
+        read,
+        lambda ticket: write_ticket(ws_id, ticket),
         mutate,
     )
 
@@ -206,6 +263,24 @@ def mutate_board(ws_id: str, mutate):
 def snapshot(ws_id: str) -> dict:
     """Board in the shape the old /api/manager/.../snapshot endpoint returned."""
     return {"workspace": get_workspace(ws_id), "tickets": read_board(ws_id)["tickets"]}
+
+
+def get_ticket(ws_id: str, ticket_id: str) -> dict:
+    ticket = next((t for t in read_board(ws_id)["tickets"] if t["id"] == ticket_id), None)
+    if ticket is None:
+        raise KeyError(f"ticket {ticket_id} not found")
+    return ticket
+
+
+def ticket_llm_profile(ws_id: str | None, ticket_id: str | None) -> str | None:
+    """The model the user asked for on a ticket, if any.
+
+    None means "manager's choice": the ticket carries no explicit selection,
+    so the model the manager picked for this dispatch stands.
+    """
+    if not (ws_id and ticket_id):
+        return None
+    return get_ticket(ws_id, ticket_id).get("llm_profile") or None
 
 
 # --------------------------------------------------------------- ticket patch
@@ -228,10 +303,7 @@ def patch_ticket(
 
     stamp = now()
 
-    def mutate(board: dict) -> dict:
-        ticket = next((t for t in board["tickets"] if t["id"] == ticket_id), None)
-        if ticket is None:
-            raise KeyError(f"ticket {ticket_id} not found")
+    def mutate(ticket: dict) -> dict:
         return _apply_ticket_patch(
             ticket, stamp,
             status=status, title=title, conversation_id=conversation_id, pr_url=pr_url,
@@ -239,7 +311,7 @@ def patch_ticket(
             append_entry=append_entry,
         )
 
-    return mutate_board(ws_id, mutate)
+    return mutate_ticket(ws_id, ticket_id, mutate)
 
 
 def _apply_ticket_patch(
@@ -491,8 +563,14 @@ def start_conversation(
     worktree: bool = True,
     max_iterations: int = 500,
     ws_id: str | None = None,
+    ticket_id: str | None = None,
 ) -> dict:
-    """Start a worker/manager conversation, or follow up on an existing one."""
+    """Start a worker/manager conversation, or follow up on an existing one.
+
+    A ticket's own model selection wins over `llm_profile`: what the user
+    picked on the request is what the worker runs on.
+    """
+    llm_profile = ticket_llm_profile(ws_id, ticket_id) or llm_profile
     if conversation_id:
         if llm_profile:
             agent_request(

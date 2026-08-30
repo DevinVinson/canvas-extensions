@@ -58,6 +58,8 @@ MANAGER_STALE_SECONDS = 45 * 60  # give up on a manager conversation after this
 RETRY_INTERVAL_SECONDS = 10 * 60  # re-kick manager if signals persist without board change
 MAX_RETRY_ATTEMPTS = 3  # cap crash-recovery retries per unchanged board state
 TERMINAL_CONV_STATUSES = {"finished", "idle", "error", "stuck", "deleted", "paused"}
+MANAGER_ACTIVE_STATUS = "running"  # the only status that means "still working"
+MANAGER_FAILED_STATUSES = {"error", "stuck"}  # died without finishing its job
 
 
 # ------------------------------------------------------------------- http utils
@@ -156,8 +158,14 @@ def get_secret(name: str) -> str:
         return ""
 
 
+def conversation_spend(conv: dict) -> float:
+    """Total USD the conversation has spent, across every LLM it used."""
+    usage = (conv.get("stats") or {}).get("usage_to_metrics") or {}
+    return sum(float((m or {}).get("accumulated_cost") or 0.0) for m in usage.values())
+
+
 def conversation_info(conv_id: str) -> dict:
-    """Return {status, tags, created_at_ts} for a conversation."""
+    """Return {status, spend, tags, created_at_ts} for a conversation."""
     try:
         d = agent(f"/api/conversations/{conv_id}?include_skills=false")
         created = d.get("created_at") or ""
@@ -167,22 +175,28 @@ def conversation_info(conv_id: str) -> dict:
             created_ts = 0.0
         return {
             "status": d.get("execution_status", "unknown"),
+            "spend": conversation_spend(d),
             "tags": d.get("tags") or {},
             "created_at_ts": created_ts,
         }
     except urllib.error.HTTPError as exc:
         status = "deleted" if exc.code == 404 else f"error_{exc.code}"
-        return {"status": status, "tags": {}, "created_at_ts": 0.0}
+        return {"status": status, "spend": 0.0, "tags": {}, "created_at_ts": 0.0}
     except Exception:  # noqa: BLE001
-        return {"status": "unreachable", "tags": {}, "created_at_ts": 0.0}
+        return {"status": "unreachable", "spend": 0.0, "tags": {}, "created_at_ts": 0.0}
 
 
 def conversation_status(conv_id: str) -> str:
     return conversation_info(conv_id)["status"]
 
 
-def find_running_manager(state: dict, ws: dict) -> tuple[str, float] | None:
-    """Return (conv_id, started_ts) of a still-running manager for this workspace.
+def manager_conversation_state(state: dict, ws: dict) -> dict:
+    """State of the manager conversation this workspace started last.
+
+    Returns {id, status, started_at, active, failed}. Only `running` counts as
+    active: a manager that ended in error/stuck (or paused/idle/finished) is
+    done and must never suppress the next kickoff — otherwise a crashed
+    manager freezes the board until someone notices.
 
     Checks the KV-tracked id first, then the id recorded on the workspace row
     (survives KV state loss). Tags verify it really is this workspace's manager.
@@ -195,16 +209,20 @@ def find_running_manager(state: dict, ws: dict) -> tuple[str, float] | None:
         candidates.append(row_conv)
     for conv_id in candidates:
         info = conversation_info(conv_id)
-        if info["status"] != "running":
-            continue
         # The KV-tracked id is trusted; a row-recorded id must carry our tags.
-        if conv_id == state.get("manager_conversation_id") or (
+        if conv_id != state.get("manager_conversation_id") and not (
             info["tags"].get("viberole") == "manager"
             and info["tags"].get("workspace") == WORKSPACE_PATH
         ):
-            started = state.get("manager_started_at") or info["created_at_ts"]
-            return conv_id, started
-    return None
+            continue
+        return {
+            "id": conv_id,
+            "status": info["status"],
+            "started_at": state.get("manager_started_at") or info["created_at_ts"],
+            "active": info["status"] == MANAGER_ACTIVE_STATUS,
+            "failed": info["status"] in MANAGER_FAILED_STATUSES,
+        }
+    return {"id": None, "status": None, "started_at": 0.0, "active": False, "failed": False}
 
 
 _PR_RE = re.compile(r"github\.com/([^/]+)/([^/]+)/pull/(\d+)")
@@ -240,13 +258,14 @@ def enrich(board: dict) -> tuple[dict, list[dict]]:
     for t in board["tickets"]:
         if t["status"] == "verified":  # terminal; user signed off — nothing to poll or manage
             continue
-        conv_status = conversation_status(t["conversation_id"]) if t.get("conversation_id") else None
+        conv = conversation_info(t["conversation_id"]) if t.get("conversation_id") else None
         prs = None
         if t.get("pr_url") and t["status"] != "finished":
             if gh_token is None:
                 gh_token = get_secret("GITHUB_PERSONAL_ACCESS_TOKEN")
             prs = pr_state(t["pr_url"], gh_token)
-        t["conv_status"] = conv_status
+        t["conv_status"] = conv["status"] if conv else None
+        t["conv_spend"] = conv["spend"] if conv else 0.0
         t["pr_state"] = prs
         tickets.append(t)
     return ws, tickets
@@ -263,6 +282,48 @@ def has_undispatched_entries(t: dict) -> bool:
     """
     dispatched = t.get("dispatched_entry_count", 0)
     return any(e.get("author") != "manager" for e in t["entries"][dispatched:])
+
+
+def over_budget(t: dict) -> bool:
+    """Has this ticket's worker spent the budget the user set on the request?"""
+    budget = t.get("max_budget")
+    if not budget or not t.get("conversation_id"):
+        return False
+    return (t.get("conv_spend") or 0.0) >= float(budget)
+
+
+def apply_budget_stops(tickets: list[dict], state: dict) -> None:
+    """Pause a worker that has spent its ticket's budget. Deterministic, no LLM.
+
+    The agent server has no max-spend option of its own, so the cap chosen on
+    the request is enforced here: the conversation is paused and the card goes
+    to needs_input, where the user decides whether the work is worth more.
+    Each conversation is stopped at most once (remembered in the KV state), so
+    a deliberate resume — by the user or by the manager relaying a follow-up —
+    is not immediately undone.
+    """
+    stopped = set(state.get("budget_stopped") or [])
+    for t in tickets:
+        conv_id = t.get("conversation_id")
+        if conv_id in stopped or not over_budget(t):
+            continue
+        if (t.get("conv_status") or "") in TERMINAL_CONV_STATUSES:
+            continue  # already done spending; nothing to pause
+        spend, budget = t.get("conv_spend") or 0.0, float(t["max_budget"])
+        print(f"budget: ticket {t['id']} spent ${spend:.2f} of ${budget:.2f} — pausing {conv_id}")
+        try:
+            agent(f"/api/conversations/{conv_id}/pause", "POST")
+        except Exception as exc:  # noqa: BLE001
+            print(f"budget: pausing {conv_id} failed: {exc}")
+            continue
+        vibestore.patch_ticket(
+            WORKSPACE_ID, t["id"], status="needs_input",
+            manager_note=f"Paused — spent ${spend:.2f} of the ${budget:.2f} budget",
+        )
+        t["status"] = "needs_input"
+        t["conv_status"] = "paused"
+        stopped.add(conv_id)
+    state["budget_stopped"] = sorted(stopped)
 
 
 def apply_mechanical_transitions(tickets: list[dict]) -> None:
@@ -361,7 +422,7 @@ def compute_signals(ws: dict, tickets: list[dict]) -> tuple[list[str], list[str]
 
 
 def kickoff_decision(state: dict, changed: bool, signals: list[str],
-                     retry_safe: list[str]) -> tuple[bool, int]:
+                     retry_safe: list[str], manager_failed: bool = False) -> tuple[bool, int]:
     """Return (kick_manager, retry_count) for this cycle.
 
     Normal path: kick when the board changed AND something is actionable.
@@ -371,12 +432,19 @@ def kickoff_decision(state: dict, changed: bool, signals: list[str],
     cap, a manager that completed but deliberately declined to act would be
     re-summoned every RETRY_INTERVAL forever (the 2026-08-21 overnight loop:
     50 no-op manager runs). The count resets whenever the fingerprint changes.
+
+    `manager_failed` (the last manager conversation ended in error/stuck)
+    skips the slow cadence: the board is unchanged precisely because that
+    manager never acted, so waiting out RETRY_INTERVAL just leaves the cards
+    stale. The attempt cap still applies, so a manager that keeps dying can
+    only be restarted MAX_RETRY_ATTEMPTS times per board state.
     """
     retry_count = 0 if changed else state.get("retry_count", 0)
+    waited = time.time() - (state.get("manager_started_at") or 0)
     stale_retry = (
         bool(retry_safe)
         and retry_count < MAX_RETRY_ATTEMPTS
-        and time.time() - (state.get("manager_started_at") or 0) > RETRY_INTERVAL_SECONDS
+        and (manager_failed or waited > RETRY_INTERVAL_SECONDS)
     )
     return bool(signals and changed) or stale_retry, retry_count
 
@@ -417,7 +485,8 @@ Choose a model PER TASK and pass it as `--profile <name>` when dispatching (omit
 - strongest/most expensive model → gnarly work: architecture, tricky debugging, large refactors, vague requirements
 - default → routine feature work and bug fixes
 - cheapest/fastest → trivial chores: copy tweaks, docs, config, one-liners
-Passing `--profile` to a follow-up switches that EXISTING conversation's model first — escalate a stuck worker to a stronger model this way."""
+Passing `--profile` to a follow-up switches that EXISTING conversation's model first — escalate a stuck worker to a stronger model this way.
+**The user's choice wins**: a ticket with a non-null `requested_model` runs on that profile, and passing `--ticket <ticket_id>` applies it for you — your `--profile` is ignored for that ticket. A null `requested_model` is "manager's choice": you pick, as above. Each ticket also carries `budget_usd`, the spend cap its worker gets; a worker that hits it is paused automatically and its card is moved to needs_input, so do not restart it without a new instruction from the user."""
 
 
 def build_manager_prompt(ws: dict, tickets: list[dict]) -> str:
@@ -434,6 +503,8 @@ def build_manager_prompt(ws: dict, tickets: list[dict]) -> str:
                 "pr_state": t.get("pr_state"),
                 "manager_note": t.get("manager_note"),
                 "dispatched_entry_count": t.get("dispatched_entry_count", 0),
+                "requested_model": t.get("llm_profile"),
+                "budget_usd": t.get("max_budget"),
                 "entries": [
                     {"author": e["author"], "body": e["body"], "created_at": e["created_at"]}
                     for e in t["entries"]
@@ -493,10 +564,11 @@ Every command prints JSON. A non-zero exit means it failed — read the `error` 
 
 Worker dispatch — workers ALWAYS work in a git worktree, never in the main checkout. The worktree is provisioned for you, its path is appended to the worker's prompt, and the conversation is filed under the right workspace in the UI.
 
-- **Start a worker**: `{VIBECTL} dispatch --prompt-file <file> --title "🎫 <short summary>" [--profile <model>]`
+- **Start a worker**: `{VIBECTL} dispatch --ticket <ticket_id> --prompt-file <file> --title "🎫 <short summary>" [--profile <model>]`
   Write the task prompt to a file first (heredoc or the file editor) — do NOT try to pass a long multi-line prompt as a shell argument.
+  ALWAYS pass `--ticket`: it applies the model the user requested on that ticket (see Model selection).
   Prints `{{"id": "<conversation_id>", ...}}` — immediately patch that id onto the ticket along with `--status in_progress`.
-- **Follow up on an existing conversation**: `{VIBECTL} followup <conv_id> --prompt-file <file> [--profile <model>]`
+- **Follow up on an existing conversation**: `{VIBECTL} followup <conv_id> --ticket <ticket_id> --prompt-file <file> [--profile <model>]`
 - **Inspect a conversation**: `{VIBECTL} conversation <conv_id> [--final-response]`
   Prints `execution_status` (running|idle|finished|error|stuck|paused), the model, and optionally the worker's final report.
 
@@ -543,23 +615,26 @@ def main() -> None:
     state = load_state()
     board = snapshot()
 
-    # If a manager conversation is already running for this workspace, bail
-    # out. Checks both the KV-tracked id and the workspace-row id (tag-verified),
+    # If a manager conversation is still running for this workspace, bail out.
+    # Checks both the KV-tracked id and the workspace-row id (tag-verified),
     # so a lost KV state can't cause overlapping managers.
-    running = find_running_manager(state, board["workspace"])
-    if running:
-        conv_id, started = running
-        if time.time() - started < MANAGER_STALE_SECONDS:
-            print(f"manager conversation {conv_id} still running — skipping")
+    mgr = manager_conversation_state(state, board["workspace"])
+    if mgr["active"]:
+        if time.time() - mgr["started_at"] < MANAGER_STALE_SECONDS:
+            print(f"manager conversation {mgr['id']} still running — skipping")
             fire_callback()
             return
-        print(f"manager conversation {conv_id} exceeded stale limit — proceeding")
+        print(f"manager conversation {mgr['id']} exceeded stale limit — proceeding")
     elif state.get("manager_conversation_id"):
-        print(f"previous manager conversation {state['manager_conversation_id']} ended")
+        print(
+            f"previous manager conversation {state['manager_conversation_id']} "
+            f"ended ({mgr['status']})"
+        )
         state["last_manager_finished_at"] = time.time()
     state["manager_conversation_id"] = None
 
     ws, tickets = enrich(board)
+    apply_budget_stops(tickets, state)
     apply_mechanical_transitions(tickets)
     fp = fingerprint(ws, tickets)
     signals, retry_safe = compute_signals(ws, tickets)
@@ -569,9 +644,12 @@ def main() -> None:
     state["conv_statuses"] = conv_statuses(tickets)
 
     changed = fp != state.get("fingerprint")
-    kick, retry_count = kickoff_decision(state, changed, signals, retry_safe)
+    kick, retry_count = kickoff_decision(
+        state, changed, signals, retry_safe, manager_failed=mgr["failed"]
+    )
     print(
         f"fingerprint changed: {changed}; signals: {signals or 'none'}; "
+        f"last manager: {mgr['status'] or 'none'}; "
         f"kick: {kick} (retries used: {retry_count}/{MAX_RETRY_ATTEMPTS})"
     )
 

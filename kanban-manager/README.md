@@ -57,9 +57,9 @@ under the Agent Server's home:
 
 ```
 ~/.openhands/vibe-manager/
-  index.json                     workspaces + settings
-  workspaces/<id>/board.json     one board per workspace
-  attachments/<id>/<filename>    uploaded files
+  index.json                                  workspaces + settings
+  workspaces/<id>/tickets/<tid>/ticket.json   one file per ticket
+  attachments/<id>/<filename>                 uploaded files
 ```
 
 The directory keeps its old name so boards created by earlier installs — and
@@ -74,15 +74,18 @@ Agent Server runs as.
 
 Two consequences worth knowing:
 
-- **The board is single-user.** Every write is a read-modify-write of one JSON
-  file with no locking. That is fine for one person driving one Canvas, and not
-  fine for concurrent writers.
+- **One file per ticket is what keeps writers apart.** There is no conditional
+  upload to build a compare-and-swap on, so the extension, the manager
+  automation and the manager's CLI would lose each other's edits if they all
+  rewrote one board document. Touching separate files, they cannot. The two
+  documents still shared — `index.json`, and a ticket two writers both target —
+  carry a `rev`/`writer` pair that detects a lost write and re-applies it.
 - **Reads bypass the HTTP cache.** The file API sends `ETag`/`Last-Modified`
-  but no `Cache-Control`, so a browser may reuse a stale board for its
-  heuristic freshness window. Because writes are read-modify-write, a stale
-  read does not just show old data, it destroys the ticket created just before
-  it. `readJson` defeats this per request; attachment blobs are immutable and
-  stay cacheable.
+  but no `Cache-Control`, so a browser may reuse a stale response for its
+  heuristic freshness window. On the directory listing that assembles the
+  board, that means a ticket created moments earlier never appears at all.
+  Both the listing and `readJson` defeat it per request; attachment blobs are
+  immutable and stay cacheable.
 
 ## Build
 

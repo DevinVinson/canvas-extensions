@@ -11,14 +11,6 @@
 
 export const BOARD_MARKUP = `
 <header class="topbar">
-  <div class="brand">
-    <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
-    <span class="brand-text">
-      <span class="brand-name">vibe</span>
-      <span class="brand-sub">agent dispatch</span>
-    </span>
-  </div>
-
   <div class="topbar-controls">
     <div class="control control-workspace">
       <select id="workspace-select" aria-label="Workspace"><option value="">Choose a workspace</option></select>
@@ -32,6 +24,13 @@ export const BOARD_MARKUP = `
         <button type="button" data-mode="pr" class="seg-btn">Pull request</button>
         <button type="button" data-mode="main" class="seg-btn">Push to main</button>
       </div>
+    </div>
+    <div class="control control-accent" id="ctl-accent" hidden>
+      <button type="button" id="accent-toggle" class="ghost-btn accent-btn"
+              aria-haspopup="true" aria-expanded="false" aria-label="Primary colour">
+        <span class="accent-dot" aria-hidden="true"></span>Colour
+      </button>
+      <div class="accent-menu" id="accent-menu" role="menu" aria-label="Primary colour" hidden></div>
     </div>
     <button id="show-verified" class="ghost-btn toggle-verified" hidden>Show verified</button>
     <div class="mgr-badge" id="mgr-badge" hidden role="button" tabindex="0"
@@ -83,7 +82,24 @@ export const BOARD_MARKUP = `
           <button type="button" id="new-ticket-attach" class="attach-btn" title="Attach files or images" aria-label="Attach files or images">
             <span aria-hidden="true">📎</span>
           </button>
+          <button type="button" id="new-ticket-settings" class="attach-btn settings-btn"
+                  aria-expanded="false" title="Request settings: agent and budget"
+                  aria-label="Request settings"><span aria-hidden="true">⚙</span></button>
+          <button type="button" id="manager-chat-open" class="ghost-btn talk-btn"
+                  title="Chat with the manager about this board">Talk to the manager</button>
           <button type="submit" id="new-ticket-submit">Send request</button>
+        </div>
+      </div>
+      <div id="new-ticket-settings-panel" class="desk-settings" hidden>
+        <div class="desk-setting">
+          <label class="control-label" for="new-ticket-profile">Agent</label>
+          <select id="new-ticket-profile">
+            <option value="">Manager's choice</option>
+          </select>
+        </div>
+        <div class="desk-setting">
+          <label class="control-label" for="new-ticket-budget">Budget ($)</label>
+          <input id="new-ticket-budget" type="number" min="1" step="1" value="10">
         </div>
       </div>
       <div id="new-ticket-files" class="file-chips" hidden></div>
@@ -156,6 +172,28 @@ export const BOARD_MARKUP = `
           <span aria-hidden="true">📎</span>
         </button>
         <button type="submit">Add</button>
+      </div>
+    </form>
+  </div>
+</aside>
+
+<aside id="manager-chat" hidden>
+  <div class="chat-backdrop" id="manager-chat-backdrop"></div>
+  <div class="chat-panel" role="dialog" aria-modal="true" aria-label="Talk to the manager">
+    <div class="chat-head">
+      <div class="chat-headings">
+        <span class="eyebrow">Talk to the manager</span>
+        <div class="chat-activity" id="manager-chat-activity"></div>
+      </div>
+      <a class="chip convo" id="manager-chat-link" hidden>↗ open conversation</a>
+      <button class="drawer-close" id="manager-chat-close" aria-label="Close">✕</button>
+    </div>
+    <div class="chat-log" id="manager-chat-log" aria-live="polite"></div>
+    <form id="manager-chat-form">
+      <textarea id="manager-chat-body" rows="2" aria-label="Message the manager"
+        placeholder="Ask for something, or ask how the board is doing…"></textarea>
+      <div class="desk-actions">
+        <button type="submit" id="manager-chat-send">Send</button>
       </div>
     </form>
   </div>

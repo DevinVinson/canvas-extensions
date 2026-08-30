@@ -51,6 +51,8 @@ export class Live {
   constructor(host) {
     this.host = host;
     this.models = new TtlCache(5 * 60 * 1000);
+    // Short TTL: the live/done indicator has to flip promptly once a worker ends.
+    this.statuses = new TtlCache(10 * 1000);
     this.summaries = new TtlCache(10 * 1000);
     this.inFlight = new Set();
   }
@@ -202,29 +204,55 @@ export class Live {
     return this.summaries.peek(convId) ?? null;
   }
 
-  // ------------------------------------------------------------- llm model
+  // ------------------------------------------- model + execution status
+
+  /* One conversation-metadata GET feeds both caches, so a card that shows the
+     model and the live/done indicator still costs a single request. */
+  refreshConversation(convId, sticky) {
+    const key = `conv:${convId}`;
+    if (this.inFlight.has(key)) return;
+    this.inFlight.add(key);
+    this.host.agentServer
+      .request({ path: `/api/conversations/${convId}?include_skills=false` })
+      .then((conv) => {
+        const model = conv?.agent?.llm?.model || null;
+        if (model) this.models.set(convId, model, sticky);
+        else this.models.set(convId, this.models.peek(convId) ?? null);
+        this.statuses.set(convId, conv?.execution_status || null);
+      })
+      // A failed refetch keeps the last known values rather than blanking them.
+      .catch(() => {
+        this.models.set(convId, this.models.peek(convId) ?? null);
+        this.statuses.set(convId, this.statuses.peek(convId) ?? null);
+      })
+      .finally(() => this.inFlight.delete(key));
+  }
 
   /** Cached model name. Terminal tickets are sticky: never refetched. */
   llmModel(convId, sticky = false) {
     if (!convId) return null;
     const cached = this.models.get(convId);
     if (cached !== undefined) return cached;
-
-    const key = `model:${convId}`;
-    if (!this.inFlight.has(key)) {
-      this.inFlight.add(key);
-      this.host.agentServer
-        .request({ path: `/api/conversations/${convId}?include_skills=false` })
-        .then((conv) => {
-          const model = conv?.agent?.llm?.model || null;
-          if (model) this.models.set(convId, model, sticky);
-          else this.models.set(convId, this.models.peek(convId) ?? null);
-        })
-        // A failed refetch keeps the last known model rather than blanking it.
-        .catch(() => this.models.set(convId, this.models.peek(convId) ?? null))
-        .finally(() => this.inFlight.delete(key));
-    }
+    this.refreshConversation(convId, sticky);
     return this.models.peek(convId) ?? null;
+  }
+
+  /** Cached execution_status — whether the worker is still acting. */
+  conversationStatus(convId) {
+    if (!convId) return null;
+    const cached = this.statuses.get(convId);
+    if (cached !== undefined) return cached;
+    this.refreshConversation(convId, false);
+    return this.statuses.peek(convId) ?? null;
+  }
+
+  /** The agent server's LLM profiles, for the request-settings picker. */
+  async llmProfiles() {
+    const res = await this.host.agentServer.request({ path: "/api/profiles" });
+    return {
+      profiles: res?.profiles || [],
+      active_profile: res?.active_profile || null,
+    };
   }
 
   primeModel(convId, model) {
@@ -245,6 +273,10 @@ export class Live {
       latest_action:
         t.status === "in_progress" && t.conversation_id
           ? this.latestAction(t.conversation_id)
+          : null,
+      conversation_status:
+        t.status === "in_progress" && t.conversation_id
+          ? this.conversationStatus(t.conversation_id)
           : null,
       llm_model: t.conversation_id
         ? this.llmModel(t.conversation_id, ["finished", "verified"].includes(t.status))

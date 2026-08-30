@@ -17,9 +17,10 @@
 */
 
 import { BOARD_MARKUP } from "./markup.js";
-import { Store } from "./store.js";
+import { Store, DEFAULT_ACCENT, DEFAULT_BUDGET } from "./store.js";
 import { Live } from "./live.js";
 import { Manager } from "./manager.js";
+import { ManagerChat } from "./managerchat.js";
 
 const HOST_API_VERSION = "1";
 // Canvas routes extension pages at /extensions/<extension>/<declared page path>.
@@ -48,7 +49,9 @@ const LANE_EMPTY = {
 
 const BOARD_POLL_MS = 5000;
 const AUTOMATION_POLL_MS = 15000;
+const CHAT_POLL_MS = 2000;
 const TRIGGER_HINT = "Click to run the manager now";
+const CHAT_AUTHOR = { user: "you", assistant: "manager" };
 
 /* ------------------------------------------------------------------ styles */
 
@@ -108,6 +111,42 @@ function shortModel(model) {
   return model.split("/").pop();
 }
 
+// Execution statuses in which a worker conversation has stopped acting: its
+// last action line is history, so the card shows a checkmark, not a pulse.
+const DONE_CONV_STATUSES = new Set([
+  "finished", "idle", "error", "stuck", "paused", "deleted",
+]);
+
+// The ten primary colours a workspace can pick, mirroring the SPA's ACCENTS in
+// static/app.js and the --accent-<id> tokens in static/style.css (which the
+// bundle builds from).
+const ACCENTS = [
+  { id: "ember", label: "Ember" },
+  { id: "amber", label: "Amber" },
+  { id: "citron", label: "Citron" },
+  { id: "jade", label: "Jade" },
+  { id: "teal", label: "Teal" },
+  { id: "azure", label: "Azure" },
+  { id: "iris", label: "Iris" },
+  { id: "orchid", label: "Orchid" },
+  { id: "rose", label: "Rose" },
+  { id: "slate", label: "Slate" },
+];
+
+function workerDone(t) {
+  return DONE_CONV_STATUSES.has(t.conversation_status);
+}
+
+function activityNodes(act, done) {
+  const mark = document.createElement("span");
+  mark.className = done ? "activity-check" : "activity-dot";
+  if (done) mark.textContent = "✓";
+  const text = document.createElement("span");
+  text.className = "activity-text";
+  text.textContent = act.summary;
+  return [mark, text];
+}
+
 /* ------------------------------------------------------------------ mount */
 
 /**
@@ -142,10 +181,12 @@ export function mountBoard({ container, path, navigate, host }) {
   }
 
   const store = new Store(host);
+  const live = new Live(host);
   const state = {
     store,
-    live: new Live(host),
+    live,
     manager: new Manager(host, store),
+    chatClient: new ManagerChat(host, store, live),
     workspaces: { available: [], selected: [] },
     ws: null,
     tickets: [],
@@ -158,6 +199,11 @@ export function mountBoard({ container, path, navigate, host }) {
     theme: readTheme(),
     pollTimer: null,
     automationTimer: null,
+    // manager chat: {wsId, conversationId, url, messages, cursor, status, action}
+    chat: null,
+    chatTimer: null,
+    chatOpen: false,
+    chatReturnFocus: null,
   };
 
   function readFlag(key) {
@@ -196,6 +242,7 @@ export function mountBoard({ container, path, navigate, host }) {
     $("#board-wrap").hidden = true;
     $("#ctl-concurrency").hidden = true;
     $("#ctl-pushmode").hidden = true;
+    $("#ctl-accent").hidden = true;
     $("#show-verified").hidden = true;
     $("#mgr-badge").hidden = true;
     $("#mgr-stop").hidden = true;
@@ -370,6 +417,9 @@ export function mountBoard({ container, path, navigate, host }) {
   }
 
   async function selectWorkspace(path, { historyMode = "push" } = {}) {
+    // A manager chat belongs to one workspace's board.
+    closeManagerChat();
+    state.chat = null;
     if (!path) {
       state.ws = null;
       try {
@@ -602,7 +652,10 @@ export function mountBoard({ container, path, navigate, host }) {
     $("#board-wrap").hidden = !has;
     $("#ctl-concurrency").hidden = !has;
     $("#ctl-pushmode").hidden = !has;
+    $("#ctl-accent").hidden = !has;
     $("#show-verified").hidden = !has;
+    if (!has) closeAccentMenu();
+    applyAccent();
     renderMgrBadge();
     if (has) {
       renderBoard();
@@ -617,6 +670,7 @@ export function mountBoard({ container, path, navigate, host }) {
     $$("#push-mode .seg-btn").forEach((b) =>
       b.classList.toggle("active", b.dataset.mode === state.ws.push_mode),
     );
+    applyAccent();
     renderMgrBadge();
   }
 
@@ -663,17 +717,12 @@ export function mountBoard({ container, path, navigate, host }) {
     }
 
     if (t.status === "in_progress" && t.latest_action?.summary) {
-      el.classList.add("live");
+      const done = workerDone(t);
+      if (!done) el.classList.add("live");
       const act = document.createElement("div");
-      act.className = "card-activity";
+      act.className = done ? "card-activity done" : "card-activity";
       act.title = t.latest_action.tool ? `tool: ${t.latest_action.tool}` : "";
-      const dot = document.createElement("span");
-      dot.className = "activity-dot";
-      act.appendChild(dot);
-      const text = document.createElement("span");
-      text.className = "activity-text";
-      text.textContent = t.latest_action.summary;
-      act.appendChild(text);
+      act.append(...activityNodes(t.latest_action, done));
       el.appendChild(act);
     }
 
@@ -826,6 +875,51 @@ export function mountBoard({ container, path, navigate, host }) {
 
   /* ------------------------------------------------------------- tickets */
 
+  /* The ⚙ panel on the new-request form: which agent runs the ticket and how
+     much it may spend. Defaults are "manager's choice" (empty profile — the
+     manager keeps picking per task) and DEFAULT_BUDGET. */
+
+  function toggleTicketSettings() {
+    const panel = $("#new-ticket-settings-panel");
+    panel.hidden = !panel.hidden;
+    $("#new-ticket-settings").setAttribute("aria-expanded", String(!panel.hidden));
+    $("#new-ticket-settings").classList.toggle("active", !panel.hidden);
+  }
+
+  async function loadLLMProfiles() {
+    const sel = $("#new-ticket-profile");
+    let data;
+    try {
+      data = await state.live.llmProfiles();
+    } catch (e) {
+      console.error(`model list unavailable: ${e.message}`);
+      return;
+    }
+    if (!alive()) return;
+    const chosen = sel.value;
+    sel.innerHTML = "";
+    const managers = document.createElement("option");
+    managers.value = "";
+    managers.textContent = "Manager's choice";
+    sel.appendChild(managers);
+    for (const p of data.profiles) {
+      const o = document.createElement("option");
+      o.value = p.name;
+      o.textContent = p.name === data.active_profile ? `${p.name} (default)` : p.name;
+      o.title = p.model || "";
+      sel.appendChild(o);
+    }
+    sel.value = chosen;
+  }
+
+  function ticketSettings() {
+    const budget = parseFloat($("#new-ticket-budget").value);
+    return {
+      llm_profile: $("#new-ticket-profile").value || null,
+      max_budget: Number.isFinite(budget) && budget > 0 ? budget : DEFAULT_BUDGET,
+    };
+  }
+
   async function submitTicket() {
     const ta = $("#new-ticket-body");
     const body = ta.value.trim();
@@ -833,7 +927,7 @@ export function mountBoard({ container, path, navigate, host }) {
     const btn = $("#new-ticket-submit");
     btn.disabled = true;
     try {
-      const ticket = await state.store.createTicket(state.ws.id, body);
+      const ticket = await state.store.createTicket(state.ws.id, body, ticketSettings());
       if (!alive()) return;
       ta.value = "";
       const files = state.newTicketFiles.splice(0);
@@ -972,17 +1066,13 @@ export function mountBoard({ container, path, navigate, host }) {
 
     const activity = $("#drawer-activity");
     const act = t.status === "in_progress" ? t.latest_action : null;
+    const done = workerDone(t);
     activity.hidden = !act?.summary;
     activity.innerHTML = "";
+    activity.classList.toggle("done", !!act?.summary && done);
     if (act?.summary) {
       activity.title = act.tool ? `tool: ${act.tool}` : "";
-      const dot = document.createElement("span");
-      dot.className = "activity-dot";
-      activity.appendChild(dot);
-      const text = document.createElement("span");
-      text.className = "activity-text";
-      text.textContent = act.summary;
-      activity.appendChild(text);
+      activity.append(...activityNodes(act, done));
     }
 
     const atts = $("#drawer-attachments");
@@ -1027,6 +1117,157 @@ export function mountBoard({ container, path, navigate, host }) {
     }
   }
 
+  /* -------------------------------------------------------- manager chat */
+
+  /* "Talk to the manager" opens a conversation of its own, pre-loaded with the
+     manager skill (src/managerchat.js): it records what the user asks for in
+     AGENTS.md and reads the board and its worker conversations back to them.
+     It is NOT the cron manager that dispatches work, so nothing here touches
+     the automation or the badge. */
+
+  async function openManagerChat() {
+    if (!state.ws) return;
+    state.chatReturnFocus = document.activeElement;
+    state.chatOpen = true;
+    $("#manager-chat").hidden = false;
+    if (state.chat && state.chat.wsId !== state.ws.id) state.chat = null;
+    renderManagerChat();
+    $("#manager-chat-body").focus();
+    if (!state.chat) await startManagerChat();
+    if (alive()) startChatPolling();
+  }
+
+  function closeManagerChat() {
+    if (!state.chatOpen) return;
+    state.chatOpen = false;
+    $("#manager-chat").hidden = true;
+    stopChatPolling();
+    const back = state.chatReturnFocus;
+    state.chatReturnFocus = null;
+    if (back?.isConnected) back.focus();
+  }
+
+  async function startManagerChat() {
+    const ws = state.ws;
+    const chat = {
+      wsId: ws.id, conversationId: null, url: null,
+      messages: [], cursor: null, status: null, action: null, error: null,
+    };
+    state.chat = chat;
+    renderManagerChat();
+    try {
+      const id = await state.chatClient.start(ws);
+      if (!alive() || state.chat !== chat) return;
+      chat.conversationId = id;
+      chat.url = `/conversations/${id}`;
+    } catch (e) {
+      if (!alive()) return;
+      console.error(`manager chat failed to start: ${e.message}`);
+      chat.error = e.message;
+    }
+    renderManagerChat();
+  }
+
+  function startChatPolling() {
+    stopChatPolling();
+    state.chatTimer = setInterval(pollManagerChat, CHAT_POLL_MS);
+    pollManagerChat();
+  }
+
+  function stopChatPolling() {
+    clearInterval(state.chatTimer);
+    state.chatTimer = null;
+  }
+  cleanups.push(stopChatPolling);
+
+  async function pollManagerChat() {
+    const chat = state.chat;
+    if (!chat?.conversationId) return;
+    try {
+      const d = await state.chatClient.messages(chat.conversationId, chat.cursor);
+      if (!alive() || state.chat !== chat) return;
+      chat.cursor = d.cursor ?? chat.cursor;
+      chat.status = state.live.conversationStatus(chat.conversationId);
+      if (d.latestAction) chat.action = d.latestAction;
+      if (d.messages.length) chat.messages.push(...d.messages);
+    } catch (e) {
+      if (!alive()) return;
+      console.error(`manager chat poll failed: ${e.message}`);
+    }
+    renderManagerChat();
+  }
+
+  async function sendChatMessage() {
+    const ta = $("#manager-chat-body");
+    const body = ta.value.trim();
+    const chat = state.chat;
+    if (!body || !chat?.conversationId) return;
+    const btn = $("#manager-chat-send");
+    btn.disabled = true;
+    try {
+      await state.chatClient.send(chat.conversationId, body);
+      if (!alive()) return;
+      ta.value = "";
+      // The message is an event on the conversation now, so the poll renders
+      // it — no optimistic copy to reconcile.
+      await pollManagerChat();
+    } catch (e) {
+      if (alive()) console.error(`manager chat send failed: ${e.message}`);
+    } finally {
+      if (alive()) btn.disabled = false;
+    }
+  }
+
+  function chatMessageEl(m) {
+    const el = document.createElement("div");
+    el.className = `chat-msg ${m.role}`;
+    const head = document.createElement("div");
+    head.className = "chat-msg-head";
+    head.textContent = CHAT_AUTHOR[m.role] ?? m.role;
+    const body = document.createElement("div");
+    body.className = "chat-msg-body";
+    body.textContent = m.text;
+    el.append(head, body);
+    return el;
+  }
+
+  function renderChatActivity() {
+    const el = $("#manager-chat-activity");
+    el.innerHTML = "";
+    const chat = state.chat;
+    if (!chat) return;
+    const working = !!chat.conversationId && !DONE_CONV_STATUSES.has(chat.status);
+    const text = chat.error ? "not connected"
+      : !chat.conversationId ? "starting the manager…"
+      : working ? (chat.action?.summary || "thinking…")
+      : "waiting for you";
+    el.classList.toggle("done", !working);
+    el.append(...activityNodes({ summary: text }, !working));
+  }
+
+  function renderManagerChat() {
+    const chat = state.chat;
+    const link = $("#manager-chat-link");
+    link.hidden = !chat?.url;
+    if (chat?.url) link.href = chat.url;
+
+    const log = $("#manager-chat-log");
+    const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 60;
+    log.innerHTML = "";
+    if (chat?.messages.length) {
+      for (const m of chat.messages) log.appendChild(chatMessageEl(m));
+    } else {
+      const empty = document.createElement("p");
+      empty.className = "lane-empty";
+      empty.textContent = chat?.error
+        ? `Could not reach the manager: ${chat.error}`
+        : "Waking the manager up — it reads AGENTS.md and the board first.";
+      log.appendChild(empty);
+    }
+    renderChatActivity();
+    if (atBottom) log.scrollTop = log.scrollHeight;
+  }
+
   /* ------------------------------------------------------------ settings */
 
   async function patchWorkspace(patch) {
@@ -1048,6 +1289,61 @@ export function mountBoard({ container, path, navigate, host }) {
     // would restyle the host application.
     if (state.theme === "light") root.dataset.theme = "light";
     else delete root.dataset.theme;
+  }
+
+  /* ------------------------------------------------------- primary colour */
+
+  /* The workspace's primary colour, stored on its index.json record. The
+     stylesheet derives every surface, line and control token from --accent, so
+     one attribute repaints the board in whichever mode is active. Scoped to
+     our own root for the same reason the theme is. */
+
+  function currentAccent() {
+    const accent = state.ws?.accent;
+    return ACCENTS.some((a) => a.id === accent) ? accent : DEFAULT_ACCENT;
+  }
+
+  function buildAccentMenu() {
+    const menu = $("#accent-menu");
+    for (const a of ACCENTS) {
+      const swatch = document.createElement("button");
+      swatch.type = "button";
+      swatch.className = "accent-swatch";
+      swatch.dataset.accent = a.id;
+      swatch.setAttribute("role", "menuitemradio");
+      swatch.setAttribute("aria-checked", "false");
+      swatch.setAttribute("aria-label", a.label);
+      swatch.title = a.label;
+      on(swatch, "click", () => setAccent(a.id));
+      menu.appendChild(swatch);
+    }
+  }
+
+  function applyAccent() {
+    const accent = currentAccent();
+    root.dataset.accent = accent;
+    const label = ACCENTS.find((a) => a.id === accent)?.label ?? accent;
+    $("#accent-toggle").title = `Primary colour: ${label}`;
+    $$("#accent-menu .accent-swatch").forEach((s) =>
+      s.setAttribute("aria-checked", String(s.dataset.accent === accent)),
+    );
+  }
+
+  function toggleAccentMenu() {
+    const menu = $("#accent-menu");
+    menu.hidden = !menu.hidden;
+    $("#accent-toggle").setAttribute("aria-expanded", String(!menu.hidden));
+  }
+
+  function closeAccentMenu() {
+    $("#accent-menu").hidden = true;
+    $("#accent-toggle").setAttribute("aria-expanded", "false");
+  }
+
+  async function setAccent(accent) {
+    closeAccentMenu();
+    if (accent === currentAccent()) return;
+    await patchWorkspace({ accent });
   }
 
   /* ---------------------------------------------------------------- wire */
@@ -1074,6 +1370,7 @@ export function mountBoard({ container, path, navigate, host }) {
     on($("#new-ticket-body"), "keydown", ticketKeydown(submitTicket));
 
     on($("#new-ticket-attach"), "click", () => $("#new-ticket-file-input").click());
+    on($("#new-ticket-settings"), "click", toggleTicketSettings);
     on($("#new-ticket-file-input"), "change", (e) => {
       state.newTicketFiles.push(...e.target.files);
       e.target.value = "";
@@ -1095,9 +1392,28 @@ export function mountBoard({ container, path, navigate, host }) {
 
     on($("#drawer-close"), "click", closeDrawer);
     on($("#drawer-backdrop"), "click", closeDrawer);
+
+    on($("#manager-chat-open"), "click", openManagerChat);
+    on($("#manager-chat-close"), "click", closeManagerChat);
+    on($("#manager-chat-backdrop"), "click", closeManagerChat);
+    on($("#manager-chat-form"), "submit", (e) => {
+      e.preventDefault();
+      sendChatMessage();
+    });
+    on($("#manager-chat-body"), "keydown", ticketKeydown(sendChatMessage));
+    // Conversations live in Canvas: route the link through the host.
+    on($("#manager-chat-link"), "click", (e) => {
+      if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+      e.preventDefault();
+      if (state.chat?.url) navigate(state.chat.url);
+    });
+
     // Document-level so Escape works wherever focus is - removed on dispose.
     on(document, "keydown", (e) => {
-      if (e.key === "Escape") closeDrawer();
+      if (e.key !== "Escape") return;
+      closeAccentMenu();
+      closeManagerChat();
+      closeDrawer();
     });
 
     on($("#max-concurrent"), "change", (e) => {
@@ -1111,6 +1427,15 @@ export function mountBoard({ container, path, navigate, host }) {
     on($("#show-verified"), "click", toggleVerified);
     renderVerifiedToggle();
 
+    buildAccentMenu();
+    on($("#accent-toggle"), "click", (e) => {
+      e.stopPropagation();
+      toggleAccentMenu();
+    });
+    on(document, "click", (e) => {
+      if (!e.target?.closest?.(".control-accent")) closeAccentMenu();
+    });
+
     // One control, two jobs: start the manager when there isn't one, run it
     // now when there is.
     const badgeAction = () => (needsStart() ? startManager() : triggerManager());
@@ -1123,6 +1448,7 @@ export function mountBoard({ container, path, navigate, host }) {
     });
     on($("#mgr-stop"), "click", stopManager);
     applyTheme();
+    applyAccent();
   }
 
   /* ---------------------------------------------------------------- boot */
@@ -1153,6 +1479,10 @@ export function mountBoard({ container, path, navigate, host }) {
      backend is already connected to. connect() renders the setup screen
      itself if the file API can't be reached, with the reason. */
   connect();
+  /* After connect() so the store root is still the first request: the profiles
+     are workspace-independent, so one fetch fills the request-settings picker
+     for the life of the mount. */
+  loadLLMProfiles();
 
   return () => {
     disposed = true;
