@@ -494,10 +494,20 @@ describe("mount", () => {
     const extRoot = container.querySelector(".vibe-ext");
     await waitFor(() => extRoot.getAttribute("data-theme") === "light");
 
-    container.querySelector("#show-verified").dispatchEvent(
-      new dom.window.Event("click", { bubbles: true }),
+    const toggle = container.querySelector("#show-verified");
+    assert.equal(
+      toggle.closest(".col").dataset.status,
+      "finished",
+      "the switch rides the Finished column's header, beside the lane it reveals",
     );
+    assert.equal(toggle.textContent.trim(), "", "an icon, not a label");
+    assert.equal(toggle.getAttribute("aria-label"), "Show verified");
+
+    toggle.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
     await waitFor(() => disk.get(indexPath)?.workspaces[0].show_verified === true);
+    assert.equal(toggle.getAttribute("aria-pressed"), "true");
+    assert.equal(toggle.getAttribute("aria-label"), "Hide verified");
+    assert.ok(toggle.classList.contains("active"), "on state is visible, not just spoken");
     dispose();
   });
 
@@ -892,6 +902,20 @@ describe("manager control", () => {
     });
     await waitFor(() => !container.querySelector("#mgr-stop").hasAttribute("hidden"));
     assert.equal(container.querySelector("#mgr-badge").classList.contains("start"), false);
+    dispose();
+  });
+
+  /* Status and start/stop are one control, not two things that happen to sit
+     next to each other. */
+  it("keeps the status and the stop button in one group", async () => {
+    const { container, dispose } = await mount(workspace({ automation_id: "auto-1" }), {
+      automations: { "auto-1": { id: "auto-1", enabled: true } },
+    });
+    await waitFor(() => !container.querySelector("#mgr-stop").hasAttribute("hidden"));
+    const group = container.querySelector("#mgr-group");
+    assert.equal(container.querySelector("#mgr-badge").parentElement, group);
+    assert.equal(container.querySelector("#mgr-stop").parentElement, group);
+    assert.equal(group.getAttribute("role"), "group");
     dispose();
   });
 

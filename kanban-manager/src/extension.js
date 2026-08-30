@@ -239,8 +239,8 @@ export function mountBoard({ container, path, navigate, host }) {
     $("#ctl-concurrency").hidden = true;
     $("#ctl-settings").hidden = true;
     $("#ctl-accent").hidden = true;
-    $("#show-verified").hidden = true;
     $("#manager-chat-open").hidden = true;
+    $("#mgr-group").hidden = true;
     $("#mgr-badge").hidden = true;
     $("#mgr-stop").hidden = true;
     const err = $("#api-setup-error");
@@ -568,11 +568,14 @@ export function mountBoard({ container, path, navigate, host }) {
   function renderMgrBadge() {
     const badge = $("#mgr-badge");
     const stop = $("#mgr-stop");
+    const group = $("#mgr-group");
     if (!state.ws) {
+      group.hidden = true;
       badge.hidden = true;
       stop.hidden = true;
       return;
     }
+    group.hidden = false;
     badge.hidden = false;
     badge.classList.remove("ok", "err", "paused", "start");
     const a = state.automation;
@@ -652,7 +655,6 @@ export function mountBoard({ container, path, navigate, host }) {
     $("#ctl-concurrency").hidden = !has;
     $("#ctl-settings").hidden = !has;
     $("#ctl-accent").hidden = !has;
-    $("#show-verified").hidden = !has;
     $("#manager-chat-open").hidden = !has;
     if (!has) {
       closeAccentMenu();
@@ -1034,9 +1036,14 @@ export function mountBoard({ container, path, navigate, host }) {
     patchWorkspace({ show_verified: state.showVerified });
   }
 
+  /* Icon-only, so the label it would have carried lives in the tooltip and the
+     accessible name instead. */
   function renderVerifiedToggle() {
     const btn = $("#show-verified");
-    btn.textContent = state.showVerified ? "Hide verified" : "Show verified";
+    const label = state.showVerified ? "Hide verified" : "Show verified";
+    btn.title = label;
+    btn.setAttribute("aria-label", label);
+    btn.setAttribute("aria-pressed", String(state.showVerified));
     btn.classList.toggle("active", state.showVerified);
   }
 

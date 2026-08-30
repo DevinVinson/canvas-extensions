@@ -61,14 +61,31 @@
 
 /* The manager control. Orange (--flare, the board's one attention colour)
    means "no manager is running here" — the automation does not exist yet, or
-   it was stopped — and the badge becomes the button that starts it. */
+   it was stopped — and the badge becomes the button that starts it. The tint
+   goes on the group, which carries the pill's border. */
 .vibe-ext .mgr-badge.start {
   color: var(--flare);
-  border-color: var(--flare-ring);
   background: rgba(255, 122, 69, .12);
 }
-.vibe-ext .mgr-badge.start:hover { border-color: var(--flare); }
+.vibe-ext .mgr-group:has(.mgr-badge.start) { border-color: var(--flare-ring); }
+.vibe-ext .mgr-group:has(.mgr-badge.start):hover { border-color: var(--flare); }
 .vibe-ext .mgr-badge.start .pulse { animation: none; }
 
+/* Second segment of the manager group: a divider instead of a border of its
+   own, so status and stop stay one control. */
+.vibe-ext .mgr-stop {
+  border: 0;
+  border-left: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-dim);
+  font-family: var(--sans);
+  font-size: 0.75rem;
+  padding: 0 13px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color .12s, background .12s;
+}
+.vibe-ext .mgr-stop:hover { color: var(--danger); background: var(--ghost-bg-hover); }
 .vibe-ext .mgr-stop[hidden] { display: none; }
 .vibe-ext .mgr-stop.working { opacity: .55; pointer-events: none; }

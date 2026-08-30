@@ -236,7 +236,6 @@ var BOARD_MARKUP = `
     </div>
     <button id="manager-chat-open" class="ghost-btn talk-btn" hidden
             title="Chat with the manager about this board">Talk to the manager</button>
-    <button id="show-verified" class="ghost-btn toggle-verified" hidden>Show verified</button>
     <div class="control control-settings" id="ctl-settings" hidden>
       <button type="button" id="settings-toggle" class="ghost-btn settings-btn"
               aria-haspopup="true" aria-expanded="false"
@@ -262,12 +261,14 @@ var BOARD_MARKUP = `
         </div>
       </div>
     </div>
-    <div class="mgr-badge" id="mgr-badge" hidden role="button" tabindex="0"
-         title="Manager automation is watching this workspace&#10;Click to run the manager now">
-      <span class="pulse" id="mgr-dot"></span> <span id="mgr-text">manager</span>
+    <div class="mgr-group" id="mgr-group" hidden role="group" aria-label="Manager automation">
+      <div class="mgr-badge" id="mgr-badge" hidden role="button" tabindex="0"
+           title="Manager automation is watching this workspace&#10;Click to run the manager now">
+        <span class="pulse" id="mgr-dot"></span> <span id="mgr-text">manager</span>
+      </div>
+      <button type="button" id="mgr-stop" class="mgr-stop" hidden
+              title="Disable the manager automation for this workspace">Stop</button>
     </div>
-    <button id="mgr-stop" class="ghost-btn mgr-stop" hidden
-            title="Disable the manager automation for this workspace">Stop manager</button>
   </div>
 </header>
 
@@ -343,6 +344,14 @@ var BOARD_MARKUP = `
         <div class="col-head">
           <span class="col-name">Finished</span>
           <span class="col-count"></span>
+          <button type="button" id="show-verified" class="toggle-verified" aria-pressed="false"
+                  title="Show verified" aria-label="Show verified">
+            <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false">
+              <path d="M1.8 12S5.4 5.8 12 5.8 22.2 12 22.2 12 18.6 18.2 12 18.2 1.8 12 1.8 12Z"
+                    fill="none" stroke="currentColor" stroke-width="1.8"/>
+              <circle cx="12" cy="12" r="3.1" fill="none" stroke="currentColor" stroke-width="1.8"/>
+            </svg>
+          </button>
         </div>
         <div class="col-cards" data-status="finished"></div>
       </section>
@@ -1645,9 +1654,6 @@ var EXTENSION_CSS = true ? `.vibe-ext { --vibe-rem: 1.2rem; }
   transition: color .12s, border-color .12s, background .12s;
 }
 .vibe-ext .ghost-btn:hover { color: var(--text); background: var(--ghost-bg-hover); border-color: var(--text-faint); }
-.vibe-ext .toggle-verified.active {
-  color: var(--lane-verified); border-color: var(--lane-verified); background: var(--lane-tint);
-}
 
 /* ------------------------------------------------------- primary colour */
 /* The control is a bare dot in the current primary \u2014 no label, since the dot
@@ -1707,16 +1713,29 @@ var EXTENSION_CSS = true ? `.vibe-ext { --vibe-rem: 1.2rem; }
 .vibe-ext .desk-setting { display: flex; align-items: center; gap: var(--s3); justify-content: space-between; }
 .vibe-ext .desk-setting select { min-width: calc(12 * var(--vibe-rem)); }
 
+/* Manager status and start/stop are one control: the badge reports the manager
+   (and re-runs, or starts, it on click), and the extension adds a stop segment
+   beside it (#mgr-stop, styled in the extension's setup.css). The pill's border
+   lives on the group so the segments read as one button. */
+.vibe-ext .mgr-group {
+  display: inline-flex; align-items: stretch;
+  border: 1px solid var(--line); background: var(--ghost-bg);
+  border-radius: 999px; overflow: hidden;
+}
+.vibe-ext .mgr-group:hover { border-color: var(--lane-progress); }
+.vibe-ext .mgr-group:has(.mgr-badge.err) { border-color: var(--danger-line); }
+
 .vibe-ext .mgr-badge {
   display: flex; align-items: center; gap: var(--s2);
   font-family: var(--mono); font-size: calc(0.6875 * var(--vibe-rem)); letter-spacing: .02em;
   color: var(--lane-progress);
-  border: 1px solid var(--line); background: var(--ghost-bg);
-  padding: 7px 13px; border-radius: 999px;
+  border: 0; background: transparent;
+  padding: 7px 13px;
   cursor: pointer; user-select: none; white-space: nowrap;
 }
-.vibe-ext .mgr-badge:hover { border-color: var(--lane-progress); }
+.vibe-ext .mgr-badge:hover { background: var(--ghost-bg-hover); }
 .vibe-ext .mgr-badge.triggering { opacity: .55; pointer-events: none; }
+
 .vibe-ext .pulse {
   width: 7px; height: 7px; border-radius: 50%; flex: none;
   background: currentColor; animation: pulse 2s infinite;
@@ -1724,7 +1743,7 @@ var EXTENSION_CSS = true ? `.vibe-ext { --vibe-rem: 1.2rem; }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .2; } }
 .vibe-ext .mgr-badge.ok { color: var(--lane-verified); }
 .vibe-ext .mgr-badge.ok .pulse, .vibe-ext .mgr-badge.err .pulse, .vibe-ext .mgr-badge.paused .pulse { animation: none; }
-.vibe-ext .mgr-badge.err { color: var(--danger); border-color: var(--danger-line); }
+.vibe-ext .mgr-badge.err { color: var(--danger); }
 .vibe-ext .mgr-badge.paused { color: var(--text-dim); }
 
 /* ------------------------------------------------------------- empty state */
@@ -1844,6 +1863,20 @@ var EXTENSION_CSS = true ? `.vibe-ext { --vibe-rem: 1.2rem; }
 .vibe-ext .col-count {
   margin-left: auto; font-family: var(--mono); font-size: calc(0.6875 * var(--vibe-rem));
   color: var(--lane); min-width: calc(1.2 * var(--vibe-rem)); text-align: right;
+}
+
+/* The verified lane's switch sits on the Finished header, where the column it
+   reveals appears: an eye, no label, lit in the verified lane's colour when on. */
+.vibe-ext .toggle-verified {
+  display: inline-flex; align-items: center; justify-content: center; flex: none;
+  width: calc(1.5 * var(--vibe-rem)); height: calc(1.5 * var(--vibe-rem)); padding: 0; line-height: 0;
+  background: var(--ghost-bg); color: var(--text-faint);
+  border: 1px solid var(--line); border-radius: 999px; cursor: pointer;
+  transition: color .12s, border-color .12s, background .12s;
+}
+.vibe-ext .toggle-verified:hover { color: var(--text); border-color: var(--text-faint); }
+.vibe-ext .toggle-verified.active {
+  color: var(--lane-verified); border-color: var(--lane-verified); background: var(--lane-tint);
 }
 
 .vibe-ext .col-cards { padding: var(--s2); display: flex; flex-direction: column; gap: var(--s2); flex: 1; }
@@ -2213,15 +2246,32 @@ var EXTENSION_CSS = true ? `.vibe-ext { --vibe-rem: 1.2rem; }
 
 /* The manager control. Orange (--flare, the board's one attention colour)
    means "no manager is running here" \u2014 the automation does not exist yet, or
-   it was stopped \u2014 and the badge becomes the button that starts it. */
+   it was stopped \u2014 and the badge becomes the button that starts it. The tint
+   goes on the group, which carries the pill's border. */
 .vibe-ext .mgr-badge.start {
   color: var(--flare);
-  border-color: var(--flare-ring);
   background: rgba(255, 122, 69, .12);
 }
-.vibe-ext .mgr-badge.start:hover { border-color: var(--flare); }
+.vibe-ext .mgr-group:has(.mgr-badge.start) { border-color: var(--flare-ring); }
+.vibe-ext .mgr-group:has(.mgr-badge.start):hover { border-color: var(--flare); }
 .vibe-ext .mgr-badge.start .pulse { animation: none; }
 
+/* Second segment of the manager group: a divider instead of a border of its
+   own, so status and stop stay one control. */
+.vibe-ext .mgr-stop {
+  border: 0;
+  border-left: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-dim);
+  font-family: var(--sans);
+  font-size: calc(0.75 * var(--vibe-rem));
+  padding: 0 13px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color .12s, background .12s;
+}
+.vibe-ext .mgr-stop:hover { color: var(--danger); background: var(--ghost-bg-hover); }
 .vibe-ext .mgr-stop[hidden] { display: none; }
 .vibe-ext .mgr-stop.working { opacity: .55; pointer-events: none; }
 ` : "";
@@ -2386,8 +2436,8 @@ function mountBoard({ container, path, navigate, host }) {
     $("#ctl-concurrency").hidden = true;
     $("#ctl-settings").hidden = true;
     $("#ctl-accent").hidden = true;
-    $("#show-verified").hidden = true;
     $("#manager-chat-open").hidden = true;
+    $("#mgr-group").hidden = true;
     $("#mgr-badge").hidden = true;
     $("#mgr-stop").hidden = true;
     const err = $("#api-setup-error");
@@ -2655,11 +2705,14 @@ function mountBoard({ container, path, navigate, host }) {
   function renderMgrBadge() {
     const badge = $("#mgr-badge");
     const stop = $("#mgr-stop");
+    const group = $("#mgr-group");
     if (!state.ws) {
+      group.hidden = true;
       badge.hidden = true;
       stop.hidden = true;
       return;
     }
+    group.hidden = false;
     badge.hidden = false;
     badge.classList.remove("ok", "err", "paused", "start");
     const a = state.automation;
@@ -2733,7 +2786,6 @@ ${TRIGGER_HINT}`;
     $("#ctl-concurrency").hidden = !has;
     $("#ctl-settings").hidden = !has;
     $("#ctl-accent").hidden = !has;
-    $("#show-verified").hidden = !has;
     $("#manager-chat-open").hidden = !has;
     if (!has) {
       closeAccentMenu();
@@ -3067,7 +3119,10 @@ ${TRIGGER_HINT}`;
   }
   function renderVerifiedToggle() {
     const btn = $("#show-verified");
-    btn.textContent = state.showVerified ? "Hide verified" : "Show verified";
+    const label = state.showVerified ? "Hide verified" : "Show verified";
+    btn.title = label;
+    btn.setAttribute("aria-label", label);
+    btn.setAttribute("aria-pressed", String(state.showVerified));
     btn.classList.toggle("active", state.showVerified);
   }
   function openDrawer(ticketId) {

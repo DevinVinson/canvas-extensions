@@ -234,9 +234,6 @@ select:hover, input[type=number]:hover { border-color: var(--text-faint); }
   transition: color .12s, border-color .12s, background .12s;
 }
 .ghost-btn:hover { color: var(--text); background: var(--ghost-bg-hover); border-color: var(--text-faint); }
-.toggle-verified.active {
-  color: var(--lane-verified); border-color: var(--lane-verified); background: var(--lane-tint);
-}
 
 /* ------------------------------------------------------- primary colour */
 /* The control is a bare dot in the current primary — no label, since the dot
@@ -296,16 +293,29 @@ select:hover, input[type=number]:hover { border-color: var(--text-faint); }
 .desk-setting { display: flex; align-items: center; gap: var(--s3); justify-content: space-between; }
 .desk-setting select { min-width: 12rem; }
 
+/* Manager status and start/stop are one control: the badge reports the manager
+   (and re-runs, or starts, it on click), and the extension adds a stop segment
+   beside it (#mgr-stop, styled in the extension's setup.css). The pill's border
+   lives on the group so the segments read as one button. */
+.mgr-group {
+  display: inline-flex; align-items: stretch;
+  border: 1px solid var(--line); background: var(--ghost-bg);
+  border-radius: 999px; overflow: hidden;
+}
+.mgr-group:hover { border-color: var(--lane-progress); }
+.mgr-group:has(.mgr-badge.err) { border-color: var(--danger-line); }
+
 .mgr-badge {
   display: flex; align-items: center; gap: var(--s2);
   font-family: var(--mono); font-size: 0.6875rem; letter-spacing: .02em;
   color: var(--lane-progress);
-  border: 1px solid var(--line); background: var(--ghost-bg);
-  padding: 7px 13px; border-radius: 999px;
+  border: 0; background: transparent;
+  padding: 7px 13px;
   cursor: pointer; user-select: none; white-space: nowrap;
 }
-.mgr-badge:hover { border-color: var(--lane-progress); }
+.mgr-badge:hover { background: var(--ghost-bg-hover); }
 .mgr-badge.triggering { opacity: .55; pointer-events: none; }
+
 .pulse {
   width: 7px; height: 7px; border-radius: 50%; flex: none;
   background: currentColor; animation: pulse 2s infinite;
@@ -313,7 +323,7 @@ select:hover, input[type=number]:hover { border-color: var(--text-faint); }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .2; } }
 .mgr-badge.ok { color: var(--lane-verified); }
 .mgr-badge.ok .pulse, .mgr-badge.err .pulse, .mgr-badge.paused .pulse { animation: none; }
-.mgr-badge.err { color: var(--danger); border-color: var(--danger-line); }
+.mgr-badge.err { color: var(--danger); }
 .mgr-badge.paused { color: var(--text-dim); }
 
 /* ------------------------------------------------------------- empty state */
@@ -433,6 +443,20 @@ select:hover, input[type=number]:hover { border-color: var(--text-faint); }
 .col-count {
   margin-left: auto; font-family: var(--mono); font-size: 0.6875rem;
   color: var(--lane); min-width: 1.2rem; text-align: right;
+}
+
+/* The verified lane's switch sits on the Finished header, where the column it
+   reveals appears: an eye, no label, lit in the verified lane's colour when on. */
+.toggle-verified {
+  display: inline-flex; align-items: center; justify-content: center; flex: none;
+  width: 1.5rem; height: 1.5rem; padding: 0; line-height: 0;
+  background: var(--ghost-bg); color: var(--text-faint);
+  border: 1px solid var(--line); border-radius: 999px; cursor: pointer;
+  transition: color .12s, border-color .12s, background .12s;
+}
+.toggle-verified:hover { color: var(--text); border-color: var(--text-faint); }
+.toggle-verified.active {
+  color: var(--lane-verified); border-color: var(--lane-verified); background: var(--lane-tint);
 }
 
 .col-cards { padding: var(--s2); display: flex; flex-direction: column; gap: var(--s2); flex: 1; }

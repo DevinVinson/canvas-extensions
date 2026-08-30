@@ -6,8 +6,9 @@
 
    Two controls are extension-only and have no counterpart in index.html: the
    #api-setup screen (the SPA is served by the API it talks to, so it never has
-   to explain that the backend is missing) and #mgr-stop (the SPA's manager
-   automation is created and owned by app.py, not by the browser). */
+   to explain that the backend is missing) and the #mgr-stop segment of the
+   manager group (the SPA's manager automation is created and owned by app.py,
+   not by the browser). */
 
 export const BOARD_MARKUP = `
 <header class="topbar">
@@ -28,7 +29,6 @@ export const BOARD_MARKUP = `
     </div>
     <button id="manager-chat-open" class="ghost-btn talk-btn" hidden
             title="Chat with the manager about this board">Talk to the manager</button>
-    <button id="show-verified" class="ghost-btn toggle-verified" hidden>Show verified</button>
     <div class="control control-settings" id="ctl-settings" hidden>
       <button type="button" id="settings-toggle" class="ghost-btn settings-btn"
               aria-haspopup="true" aria-expanded="false"
@@ -54,12 +54,14 @@ export const BOARD_MARKUP = `
         </div>
       </div>
     </div>
-    <div class="mgr-badge" id="mgr-badge" hidden role="button" tabindex="0"
-         title="Manager automation is watching this workspace&#10;Click to run the manager now">
-      <span class="pulse" id="mgr-dot"></span> <span id="mgr-text">manager</span>
+    <div class="mgr-group" id="mgr-group" hidden role="group" aria-label="Manager automation">
+      <div class="mgr-badge" id="mgr-badge" hidden role="button" tabindex="0"
+           title="Manager automation is watching this workspace&#10;Click to run the manager now">
+        <span class="pulse" id="mgr-dot"></span> <span id="mgr-text">manager</span>
+      </div>
+      <button type="button" id="mgr-stop" class="mgr-stop" hidden
+              title="Disable the manager automation for this workspace">Stop</button>
     </div>
-    <button id="mgr-stop" class="ghost-btn mgr-stop" hidden
-            title="Disable the manager automation for this workspace">Stop manager</button>
   </div>
 </header>
 
@@ -135,6 +137,14 @@ export const BOARD_MARKUP = `
         <div class="col-head">
           <span class="col-name">Finished</span>
           <span class="col-count"></span>
+          <button type="button" id="show-verified" class="toggle-verified" aria-pressed="false"
+                  title="Show verified" aria-label="Show verified">
+            <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false">
+              <path d="M1.8 12S5.4 5.8 12 5.8 22.2 12 22.2 12 18.6 18.2 12 18.2 1.8 12 1.8 12Z"
+                    fill="none" stroke="currentColor" stroke-width="1.8"/>
+              <circle cx="12" cy="12" r="3.1" fill="none" stroke="currentColor" stroke-width="1.8"/>
+            </svg>
+          </button>
         </div>
         <div class="col-cards" data-status="finished"></div>
       </section>
