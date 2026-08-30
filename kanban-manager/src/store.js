@@ -35,6 +35,9 @@ export const VERIFIED = "verified";
    for records written before the field existed. */
 export const DEFAULT_ACCENT = "ember";
 
+/* Colour theme, also a per-workspace setting on the record. */
+export const DEFAULT_THEME = "dark";
+
 /* Spend cap (USD) a new request gets unless the user changes it. The
    automation enforces it by watching the worker conversation's cost. */
 export const DEFAULT_BUDGET = 10;
@@ -376,6 +379,12 @@ export class Store {
         max_concurrent: 2,
         push_mode: "main",
         accent: DEFAULT_ACCENT,
+        theme: DEFAULT_THEME,
+        show_verified: false,
+        // null = "manager's choice"; the default request settings the ⚙
+        // popover edits, applied to every new ticket on this board.
+        llm_profile: null,
+        max_budget: DEFAULT_BUDGET,
         automation_id: null,
         manager_conversation_id: null,
         created_at: nowTs(),

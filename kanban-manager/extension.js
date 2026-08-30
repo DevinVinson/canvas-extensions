@@ -223,24 +223,45 @@ var BOARD_MARKUP = `
     <div class="control control-workspace">
       <select id="workspace-select" aria-label="Workspace"><option value="">Choose a workspace</option></select>
     </div>
+    <div class="control control-accent" id="ctl-accent" hidden>
+      <button type="button" id="accent-toggle" class="ghost-btn accent-btn"
+              aria-haspopup="true" aria-expanded="false" aria-label="Primary colour">
+        <span class="accent-dot" aria-hidden="true"></span>
+      </button>
+      <div class="accent-menu" id="accent-menu" role="menu" aria-label="Primary colour" hidden></div>
+    </div>
     <div class="control" id="ctl-concurrency" hidden>
       <label class="control-label" for="max-concurrent">Max agents</label>
       <input id="max-concurrent" type="number" min="1" max="20" value="3">
     </div>
-    <div class="control" id="ctl-pushmode" hidden>
-      <div class="seg" id="push-mode" role="group" aria-label="Where changes land">
-        <button type="button" data-mode="pr" class="seg-btn">Pull request</button>
-        <button type="button" data-mode="main" class="seg-btn">Push to main</button>
+    <button id="manager-chat-open" class="ghost-btn talk-btn" hidden
+            title="Chat with the manager about this board">Talk to the manager</button>
+    <button id="show-verified" class="ghost-btn toggle-verified" hidden>Show verified</button>
+    <div class="control control-settings" id="ctl-settings" hidden>
+      <button type="button" id="settings-toggle" class="ghost-btn settings-btn"
+              aria-haspopup="true" aria-expanded="false"
+              title="Workspace settings: agent, budget, where changes land"
+              aria-label="Workspace settings"><span aria-hidden="true">\u2699</span></button>
+      <div class="settings-menu" id="settings-menu" role="group" aria-label="Workspace settings" hidden>
+        <div class="desk-setting">
+          <label class="control-label" for="settings-profile">Agent</label>
+          <select id="settings-profile">
+            <option value="">Manager's choice</option>
+          </select>
+        </div>
+        <div class="desk-setting">
+          <label class="control-label" for="settings-budget">Budget ($)</label>
+          <input id="settings-budget" type="number" min="1" step="1" value="10">
+        </div>
+        <div class="desk-setting">
+          <span class="control-label">Where changes land</span>
+          <div class="seg" id="push-mode" role="group" aria-label="Where changes land">
+            <button type="button" data-mode="pr" class="seg-btn">Pull request</button>
+            <button type="button" data-mode="main" class="seg-btn">Push to main</button>
+          </div>
+        </div>
       </div>
     </div>
-    <div class="control control-accent" id="ctl-accent" hidden>
-      <button type="button" id="accent-toggle" class="ghost-btn accent-btn"
-              aria-haspopup="true" aria-expanded="false" aria-label="Primary colour">
-        <span class="accent-dot" aria-hidden="true"></span>Colour
-      </button>
-      <div class="accent-menu" id="accent-menu" role="menu" aria-label="Primary colour" hidden></div>
-    </div>
-    <button id="show-verified" class="ghost-btn toggle-verified" hidden>Show verified</button>
     <div class="mgr-badge" id="mgr-badge" hidden role="button" tabindex="0"
          title="Manager automation is watching this workspace&#10;Click to run the manager now">
       <span class="pulse" id="mgr-dot"></span> <span id="mgr-text">manager</span>
@@ -290,24 +311,7 @@ var BOARD_MARKUP = `
           <button type="button" id="new-ticket-attach" class="attach-btn" title="Attach files or images" aria-label="Attach files or images">
             <span aria-hidden="true">\u{1F4CE}</span>
           </button>
-          <button type="button" id="new-ticket-settings" class="attach-btn settings-btn"
-                  aria-expanded="false" title="Request settings: agent and budget"
-                  aria-label="Request settings"><span aria-hidden="true">\u2699</span></button>
-          <button type="button" id="manager-chat-open" class="ghost-btn talk-btn"
-                  title="Chat with the manager about this board">Talk to the manager</button>
           <button type="submit" id="new-ticket-submit">Send request</button>
-        </div>
-      </div>
-      <div id="new-ticket-settings-panel" class="desk-settings" hidden>
-        <div class="desk-setting">
-          <label class="control-label" for="new-ticket-profile">Agent</label>
-          <select id="new-ticket-profile">
-            <option value="">Manager's choice</option>
-          </select>
-        </div>
-        <div class="desk-setting">
-          <label class="control-label" for="new-ticket-budget">Budget ($)</label>
-          <input id="new-ticket-budget" type="number" min="1" step="1" value="10">
         </div>
       </div>
       <div id="new-ticket-files" class="file-chips" hidden></div>
@@ -413,6 +417,7 @@ var STORE_SUBPATH = ".openhands/vibe-manager";
 var STATUSES = ["pending", "in_progress", "needs_input", "finished"];
 var VERIFIED = "verified";
 var DEFAULT_ACCENT = "ember";
+var DEFAULT_THEME = "dark";
 var DEFAULT_BUDGET = 10;
 function newId() {
   const bytes = new Uint8Array(6);
@@ -679,6 +684,12 @@ var Store = class {
         max_concurrent: 2,
         push_mode: "main",
         accent: DEFAULT_ACCENT,
+        theme: DEFAULT_THEME,
+        show_verified: false,
+        // null = "manager's choice"; the default request settings the ⚙
+        // popover edits, applied to every new ticket on this board.
+        llm_profile: null,
+        max_budget: DEFAULT_BUDGET,
         automation_id: null,
         manager_conversation_id: null,
         created_at: nowTs()
@@ -1406,9 +1417,12 @@ var EXTENSION_CSS = true ? `.vibe-ext { --vibe-rem: 1.2rem; }
    one of the two blocks, or light mode breaks.
 
    The primary colour is per workspace: one of ten, written to <html> as
-   data-accent. Only --accent switches; every surface, line, text and control
-   token is a fixed neutral base washed with it through color-mix, so the whole
-   theme shifts from one declaration and both modes stay in step. Lane hues are
+   data-accent. It is not a garnish \u2014 it IS the background. Only --accent
+   switches; every surface, line, text and control token is that one hue held
+   at a fixed lightness and chroma (\`oklch(from var(--accent) L C h)\`), so all
+   ten palettes are the same design in a different hue and both modes stay in
+   step. --tone-bg is the app background step, shared with the picker swatches
+   so a swatch shows the exact background it will give you. Lane hues are
    deliberately NOT accent-derived \u2014 they encode status, so they must not drift
    into each other when the primary happens to sit on a lane's hue. */
 
@@ -1426,19 +1440,20 @@ var EXTENSION_CSS = true ? `.vibe-ext { --vibe-rem: 1.2rem; }
   --accent-slate: #8d93b8;
   --accent: var(--accent-ember);
 
-  /* surfaces */
-  --ink: color-mix(in oklab, var(--accent) 14%, #040118);
-  --slab: color-mix(in oklab, var(--accent) 15%, #0b0526);
-  --card: color-mix(in oklab, var(--accent) 16%, #130b30);
-  --card-hi: color-mix(in oklab, var(--accent) 18%, #1a113b);
-  --field: color-mix(in oklab, var(--accent) 14%, #090423);
-  --line: color-mix(in oklab, var(--accent) 22%, #1d1440);
-  --line-soft: color-mix(in oklab, var(--accent) 18%, #150e32);
+  /* surfaces: the primary, deep */
+  --tone-bg: .205 .05;
+  --ink: oklch(from var(--accent) var(--tone-bg) h);
+  --slab: oklch(from var(--accent) .25 .052 h);
+  --card: oklch(from var(--accent) .295 .055 h);
+  --card-hi: oklch(from var(--accent) .345 .06 h);
+  --field: oklch(from var(--accent) .235 .048 h);
+  --line: oklch(from var(--accent) .42 .062 h);
+  --line-soft: oklch(from var(--accent) .33 .055 h);
 
   /* text */
-  --text: color-mix(in oklab, var(--accent) 8%, #f0effa);
-  --text-dim: color-mix(in oklab, var(--accent) 18%, #9c9ac2);
-  --text-faint: color-mix(in oklab, var(--accent) 22%, #605c8a);
+  --text: oklch(from var(--accent) .95 .028 h);
+  --text-dim: oklch(from var(--accent) .755 .042 h);
+  --text-faint: oklch(from var(--accent) .585 .045 h);
 
   /* lanes */
   --lane-pending: #8d93b8;
@@ -1455,11 +1470,11 @@ var EXTENSION_CSS = true ? `.vibe-ext { --vibe-rem: 1.2rem; }
   --danger-line: rgba(255, 111, 139, .38);
 
   /* neutral controls */
-  --btn-bg: color-mix(in oklab, var(--accent) 9%, #f1f0fb);
-  --btn-bg-hover: color-mix(in oklab, var(--accent) 7%, #ffffff);
-  --btn-text: color-mix(in oklab, var(--accent) 14%, #080321);
-  --ghost-bg: color-mix(in oklab, var(--accent) 18%, #0e0629);
-  --ghost-bg-hover: color-mix(in oklab, var(--accent) 20%, #170d38);
+  --btn-bg: oklch(from var(--accent) .95 .032 h);
+  --btn-bg-hover: oklch(from var(--accent) .99 .018 h);
+  --btn-text: oklch(from var(--accent) .225 .055 h);
+  --ghost-bg: oklch(from var(--accent) .285 .055 h);
+  --ghost-bg-hover: oklch(from var(--accent) .35 .06 h);
 
   /* chrome */
   --topbar-bg: color-mix(in srgb, var(--ink) 88%, transparent);
@@ -1482,9 +1497,9 @@ var EXTENSION_CSS = true ? `.vibe-ext { --vibe-rem: 1.2rem; }
 }
 
 .vibe-ext[data-theme="light"] {
-  /* cool paper: muted surfaces, no pure white cards, eased near-black text.
-     The primaries are restated darker here so they carry on paper; the mixes
-     below then land on soft off-white washes of whichever one is selected. */
+  /* the same hue, pale: the primary tinted paper rather than white. The
+     primaries are restated darker here so they still carry as a flare on
+     paper; only their hue reaches the surfaces. */
   --accent-ember: #d1552a;
   --accent-amber: #a2701c;
   --accent-citron: #6c7a1c;
@@ -1496,17 +1511,18 @@ var EXTENSION_CSS = true ? `.vibe-ext { --vibe-rem: 1.2rem; }
   --accent-rose: #bc4576;
   --accent-slate: #5a6187;
 
-  --ink: color-mix(in oklab, var(--accent) 14%, #ffffff);
-  --slab: color-mix(in oklab, var(--accent) 12%, #ffffff);
-  --card: color-mix(in oklab, var(--accent) 10%, #ffffff);
-  --card-hi: color-mix(in oklab, var(--accent) 13%, #ffffff);
-  --field: color-mix(in oklab, var(--accent) 9%, #ffffff);
-  --line: color-mix(in oklab, var(--accent) 18%, #f2f2fe);
-  --line-soft: color-mix(in oklab, var(--accent) 14%, #f8f7ff);
+  --tone-bg: .935 .038;
+  --ink: oklch(from var(--accent) var(--tone-bg) h);
+  --slab: oklch(from var(--accent) .965 .026 h);
+  --card: oklch(from var(--accent) .982 .017 h);
+  --card-hi: oklch(from var(--accent) .955 .03 h);
+  --field: oklch(from var(--accent) .99 .012 h);
+  --line: oklch(from var(--accent) .885 .045 h);
+  --line-soft: oklch(from var(--accent) .93 .032 h);
 
-  --text: color-mix(in oklab, var(--accent) 10%, #24223a);
-  --text-dim: color-mix(in oklab, var(--accent) 16%, #5d597c);
-  --text-faint: color-mix(in oklab, var(--accent) 20%, #9692b7);
+  --text: oklch(from var(--accent) .30 .045 h);
+  --text-dim: oklch(from var(--accent) .515 .05 h);
+  --text-faint: oklch(from var(--accent) .685 .045 h);
 
   --lane-pending: #767ca3;
   --lane-progress: #1c8f83;
@@ -1519,11 +1535,11 @@ var EXTENSION_CSS = true ? `.vibe-ext { --vibe-rem: 1.2rem; }
   --danger: #bc4560;
   --danger-line: rgba(188, 69, 96, .32);
 
-  --btn-bg: color-mix(in oklab, var(--accent) 16%, #1f1d35);
-  --btn-bg-hover: color-mix(in oklab, var(--accent) 18%, #2d2a4b);
-  --btn-text: color-mix(in oklab, var(--accent) 8%, #ffffff);
-  --ghost-bg: color-mix(in oklab, var(--accent) 14%, #ffffff);
-  --ghost-bg-hover: color-mix(in oklab, var(--accent) 16%, #f6f7ff);
+  --btn-bg: oklch(from var(--accent) .33 .06 h);
+  --btn-bg-hover: oklch(from var(--accent) .40 .065 h);
+  --btn-text: oklch(from var(--accent) .985 .015 h);
+  --ghost-bg: oklch(from var(--accent) .972 .024 h);
+  --ghost-bg-hover: oklch(from var(--accent) .935 .036 h);
 
   --topbar-bg: color-mix(in srgb, var(--slab) 90%, transparent);
   --backdrop: color-mix(in srgb, var(--text) 26%, transparent);
@@ -1617,6 +1633,7 @@ var EXTENSION_CSS = true ? `.vibe-ext { --vibe-rem: 1.2rem; }
 .vibe-ext .seg-btn {
   background: transparent; color: var(--text-dim); border: 0;
   padding: 7px 12px; font-family: var(--sans); font-size: calc(0.75 * var(--vibe-rem)); cursor: pointer;
+  white-space: nowrap;
 }
 .vibe-ext .seg-btn:hover { color: var(--text); background: var(--ghost-bg-hover); }
 .vibe-ext .seg-btn.active { background: var(--btn-bg); color: var(--btn-text); font-weight: 600; }
@@ -1633,22 +1650,27 @@ var EXTENSION_CSS = true ? `.vibe-ext { --vibe-rem: 1.2rem; }
 }
 
 /* ------------------------------------------------------- primary colour */
+/* The control is a bare dot in the current primary \u2014 no label, since the dot
+   is the thing. Each swatch is filled with the background that primary
+   actually paints (--tone-bg, the same step --ink uses) and rimmed in the
+   primary itself, so the menu is ten previews rather than ten stickers. */
 .vibe-ext .control-accent { position: relative; }
-.vibe-ext .accent-btn { display: inline-flex; align-items: center; gap: var(--s2); }
+.vibe-ext .accent-btn { padding: 10px; border-radius: 50%; line-height: 0; }
 .vibe-ext .accent-dot {
-  width: 11px; height: 11px; border-radius: 50%; flex: none;
+  display: block; width: calc(1 * var(--vibe-rem)); height: calc(1 * var(--vibe-rem)); border-radius: 50%; flex: none;
   background: var(--accent); box-shadow: 0 0 0 1px var(--line);
 }
 .vibe-ext .accent-menu {
-  position: absolute; top: calc(100% + var(--s2)); right: 0; z-index: 30;
+  position: absolute; top: calc(100% + var(--s2)); left: 0; z-index: 30;
   display: grid; grid-template-columns: repeat(5, auto); gap: var(--s2);
   padding: var(--s3); border-radius: var(--r-md);
   background: var(--slab); border: 1px solid var(--line);
   box-shadow: var(--shadow-panel);
 }
 .vibe-ext .accent-swatch {
-  width: 20px; height: 20px; padding: 0; border-radius: 50%; cursor: pointer;
-  background: var(--swatch); border: 1px solid var(--line-soft);
+  width: 24px; height: 24px; padding: 0; border-radius: 50%; cursor: pointer;
+  background: oklch(from var(--swatch) var(--tone-bg) h);
+  border: 3px solid var(--swatch);
   transition: transform .12s;
 }
 .vibe-ext .accent-swatch:hover { transform: scale(1.15); }
@@ -1665,6 +1687,25 @@ var EXTENSION_CSS = true ? `.vibe-ext { --vibe-rem: 1.2rem; }
 .vibe-ext .accent-swatch[data-accent="orchid"] { --swatch: var(--accent-orchid); }
 .vibe-ext .accent-swatch[data-accent="rose"] { --swatch: var(--accent-rose); }
 .vibe-ext .accent-swatch[data-accent="slate"] { --swatch: var(--accent-slate); }
+
+/* ---------------------------------------------------- workspace settings */
+/* Everything the workspace remembers that isn't a one-click control lives in
+   this \u2699 popover: which agent runs a request, its budget, and where changes
+   land. */
+.vibe-ext .control-settings { position: relative; }
+.vibe-ext .settings-btn { padding: 8px 12px; font-size: calc(0.9375 * var(--vibe-rem)); line-height: 1; }
+.vibe-ext .settings-btn.active {
+  color: var(--text); background: var(--ghost-bg-hover); border-color: var(--text-faint);
+}
+.vibe-ext .settings-menu {
+  position: absolute; top: calc(100% + var(--s2)); right: 0; z-index: 30;
+  display: flex; flex-direction: column; gap: var(--s3);
+  padding: var(--s4); border-radius: var(--r-md);
+  background: var(--slab); border: 1px solid var(--line);
+  box-shadow: var(--shadow-panel);
+}
+.vibe-ext .desk-setting { display: flex; align-items: center; gap: var(--s3); justify-content: space-between; }
+.vibe-ext .desk-setting select { min-width: calc(12 * var(--vibe-rem)); }
 
 .vibe-ext .mgr-badge {
   display: flex; align-items: center; gap: var(--s2);
@@ -1739,16 +1780,6 @@ var EXTENSION_CSS = true ? `.vibe-ext { --vibe-rem: 1.2rem; }
 }
 .vibe-ext .attach-btn:hover { background: var(--ghost-bg-hover); border-color: var(--text-faint); }
 .vibe-ext .talk-btn { white-space: nowrap; }
-.vibe-ext .settings-btn.active {
-  color: var(--text); background: var(--ghost-bg-hover); border-color: var(--text-faint);
-}
-
-.vibe-ext .desk-settings {
-  display: flex; flex-wrap: wrap; gap: var(--s4);
-  padding-top: var(--s3); border-top: 1px solid var(--line-soft);
-}
-.vibe-ext .desk-setting { display: flex; align-items: center; gap: var(--s2); }
-.vibe-ext .desk-setting select { min-width: calc(12 * var(--vibe-rem)); }
 
 .vibe-ext #new-ticket-submit, .vibe-ext #append-form button[type=submit] {
   background: var(--btn-bg); color: var(--btn-text); border: 0;
@@ -2320,7 +2351,9 @@ function mountBoard({ container, path, navigate, host }) {
     automation: null,
     dragging: null,
     returnFocus: null,
-    showVerified: readFlag("vibe.showVerified"),
+    // Preferences live on the workspace record in the store; until one is
+    // open the theme falls back to the browser hint the SPA leaves behind.
+    showVerified: false,
     newTicketFiles: [],
     theme: readTheme(),
     pollTimer: null,
@@ -2331,16 +2364,10 @@ function mountBoard({ container, path, navigate, host }) {
     chatOpen: false,
     chatReturnFocus: null
   };
-  function readFlag(key) {
-    try {
-      return localStorage.getItem(key) === "1";
-    } catch {
-      return false;
-    }
-  }
   function readTheme() {
     try {
-      return localStorage.getItem("vibe.theme") === "light" ? "light" : "dark";
+      const hint = localStorage.getItem("vibe.theme.hint") ?? localStorage.getItem("vibe.theme");
+      return hint === "light" ? "light" : "dark";
     } catch {
       return "dark";
     }
@@ -2357,9 +2384,10 @@ function mountBoard({ container, path, navigate, host }) {
     $("#empty-state").hidden = true;
     $("#board-wrap").hidden = true;
     $("#ctl-concurrency").hidden = true;
-    $("#ctl-pushmode").hidden = true;
+    $("#ctl-settings").hidden = true;
     $("#ctl-accent").hidden = true;
     $("#show-verified").hidden = true;
+    $("#manager-chat-open").hidden = true;
     $("#mgr-badge").hidden = true;
     $("#mgr-stop").hidden = true;
     const err = $("#api-setup-error");
@@ -2519,6 +2547,7 @@ function mountBoard({ container, path, navigate, host }) {
       if (!alive()) return;
       state.ws = ws;
       state.automation = null;
+      adoptWorkspacePrefs();
       persist("vibe.workspace", path2);
       syncRoute(historyMode);
       await refreshBoard();
@@ -2539,6 +2568,7 @@ function mountBoard({ container, path, navigate, host }) {
       const data = await state.store.getBoard(state.ws.id);
       if (!alive() || state.store.writes !== writes) return;
       state.ws = data.workspace;
+      adoptWorkspacePrefs();
       state.tickets = state.live.decorate(data.tickets, "");
       renderBoard();
       renderSettings();
@@ -2701,11 +2731,16 @@ ${TRIGGER_HINT}`;
     $("#empty-state").hidden = has;
     $("#board-wrap").hidden = !has;
     $("#ctl-concurrency").hidden = !has;
-    $("#ctl-pushmode").hidden = !has;
+    $("#ctl-settings").hidden = !has;
     $("#ctl-accent").hidden = !has;
     $("#show-verified").hidden = !has;
-    if (!has) closeAccentMenu();
+    $("#manager-chat-open").hidden = !has;
+    if (!has) {
+      closeAccentMenu();
+      closeSettingsMenu();
+    }
     applyAccent();
+    applyTheme();
     renderMgrBadge();
     if (has) {
       renderBoard();
@@ -2716,11 +2751,22 @@ ${TRIGGER_HINT}`;
     if (!state.ws) return;
     const mc = $("#max-concurrent");
     if (document.activeElement !== mc) mc.value = state.ws.max_concurrent;
+    const budget = $("#settings-budget");
+    if (document.activeElement !== budget) budget.value = state.ws.max_budget ?? DEFAULT_BUDGET;
+    const profile = $("#settings-profile");
+    if (document.activeElement !== profile) profile.value = state.ws.llm_profile ?? "";
     $$("#push-mode .seg-btn").forEach(
       (b) => b.classList.toggle("active", b.dataset.mode === state.ws.push_mode)
     );
     applyAccent();
+    applyTheme();
+    renderVerifiedToggle();
     renderMgrBadge();
+  }
+  function adoptWorkspacePrefs() {
+    if (!state.ws) return;
+    state.showVerified = !!state.ws.show_verified;
+    if (state.ws.theme) state.theme = state.ws.theme === "light" ? "light" : "dark";
   }
   function modelChip(model) {
     const chip = document.createElement("span");
@@ -2896,14 +2942,19 @@ ${TRIGGER_HINT}`;
       refreshBoard();
     }
   }
-  function toggleTicketSettings() {
-    const panel = $("#new-ticket-settings-panel");
-    panel.hidden = !panel.hidden;
-    $("#new-ticket-settings").setAttribute("aria-expanded", String(!panel.hidden));
-    $("#new-ticket-settings").classList.toggle("active", !panel.hidden);
+  function toggleSettingsMenu() {
+    const menu = $("#settings-menu");
+    menu.hidden = !menu.hidden;
+    $("#settings-toggle").setAttribute("aria-expanded", String(!menu.hidden));
+    $("#settings-toggle").classList.toggle("active", !menu.hidden);
+  }
+  function closeSettingsMenu() {
+    $("#settings-menu").hidden = true;
+    $("#settings-toggle").setAttribute("aria-expanded", "false");
+    $("#settings-toggle").classList.remove("active");
   }
   async function loadLLMProfiles() {
-    const sel = $("#new-ticket-profile");
+    const sel = $("#settings-profile");
     let data;
     try {
       data = await state.live.llmProfiles();
@@ -2912,7 +2963,7 @@ ${TRIGGER_HINT}`;
       return;
     }
     if (!alive()) return;
-    const chosen = sel.value;
+    const chosen = state.ws?.llm_profile ?? sel.value;
     sel.innerHTML = "";
     const managers = document.createElement("option");
     managers.value = "";
@@ -2928,9 +2979,9 @@ ${TRIGGER_HINT}`;
     sel.value = chosen;
   }
   function ticketSettings() {
-    const budget = parseFloat($("#new-ticket-budget").value);
+    const budget = Number(state.ws?.max_budget);
     return {
-      llm_profile: $("#new-ticket-profile").value || null,
+      llm_profile: state.ws?.llm_profile || null,
       max_budget: Number.isFinite(budget) && budget > 0 ? budget : DEFAULT_BUDGET
     };
   }
@@ -3010,9 +3061,9 @@ ${TRIGGER_HINT}`;
   }
   function toggleVerified() {
     state.showVerified = !state.showVerified;
-    persist("vibe.showVerified", state.showVerified ? "1" : "0");
     renderVerifiedToggle();
     renderBoard();
+    patchWorkspace({ show_verified: state.showVerified });
   }
   function renderVerifiedToggle() {
     const btn = $("#show-verified");
@@ -3251,6 +3302,7 @@ ${TRIGGER_HINT}`;
       const ws = await state.store.updateWorkspace(state.ws.id, patch);
       if (!alive()) return;
       state.ws = ws;
+      adoptWorkspacePrefs();
       renderSettings();
     } catch (e) {
       if (alive()) console.error(`settings failed: ${e.message}`);
@@ -3319,7 +3371,6 @@ ${TRIGGER_HINT}`;
     });
     on($("#new-ticket-body"), "keydown", ticketKeydown(submitTicket));
     on($("#new-ticket-attach"), "click", () => $("#new-ticket-file-input").click());
-    on($("#new-ticket-settings"), "click", toggleTicketSettings);
     on($("#new-ticket-file-input"), "change", (e) => {
       state.newTicketFiles.push(...e.target.files);
       e.target.value = "";
@@ -3354,6 +3405,7 @@ ${TRIGGER_HINT}`;
     on(document, "keydown", (e) => {
       if (e.key !== "Escape") return;
       closeAccentMenu();
+      closeSettingsMenu();
       closeManagerChat();
       closeDrawer();
     });
@@ -3364,6 +3416,22 @@ ${TRIGGER_HINT}`;
     $$("#push-mode .seg-btn").forEach(
       (b) => on(b, "click", () => patchWorkspace({ push_mode: b.dataset.mode }))
     );
+    on($("#settings-toggle"), "click", (e) => {
+      e.stopPropagation();
+      toggleSettingsMenu();
+    });
+    on(document, "click", (e) => {
+      if (!e.target?.closest?.(".control-settings")) closeSettingsMenu();
+    });
+    on(
+      $("#settings-profile"),
+      "change",
+      (e) => patchWorkspace({ llm_profile: e.target.value || null })
+    );
+    on($("#settings-budget"), "change", (e) => {
+      const v = parseFloat(e.target.value);
+      if (v > 0) patchWorkspace({ max_budget: v });
+    });
     on($("#show-verified"), "click", toggleVerified);
     renderVerifiedToggle();
     buildAccentMenu();

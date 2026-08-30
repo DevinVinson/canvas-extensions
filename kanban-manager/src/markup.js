@@ -15,24 +15,45 @@ export const BOARD_MARKUP = `
     <div class="control control-workspace">
       <select id="workspace-select" aria-label="Workspace"><option value="">Choose a workspace</option></select>
     </div>
+    <div class="control control-accent" id="ctl-accent" hidden>
+      <button type="button" id="accent-toggle" class="ghost-btn accent-btn"
+              aria-haspopup="true" aria-expanded="false" aria-label="Primary colour">
+        <span class="accent-dot" aria-hidden="true"></span>
+      </button>
+      <div class="accent-menu" id="accent-menu" role="menu" aria-label="Primary colour" hidden></div>
+    </div>
     <div class="control" id="ctl-concurrency" hidden>
       <label class="control-label" for="max-concurrent">Max agents</label>
       <input id="max-concurrent" type="number" min="1" max="20" value="3">
     </div>
-    <div class="control" id="ctl-pushmode" hidden>
-      <div class="seg" id="push-mode" role="group" aria-label="Where changes land">
-        <button type="button" data-mode="pr" class="seg-btn">Pull request</button>
-        <button type="button" data-mode="main" class="seg-btn">Push to main</button>
+    <button id="manager-chat-open" class="ghost-btn talk-btn" hidden
+            title="Chat with the manager about this board">Talk to the manager</button>
+    <button id="show-verified" class="ghost-btn toggle-verified" hidden>Show verified</button>
+    <div class="control control-settings" id="ctl-settings" hidden>
+      <button type="button" id="settings-toggle" class="ghost-btn settings-btn"
+              aria-haspopup="true" aria-expanded="false"
+              title="Workspace settings: agent, budget, where changes land"
+              aria-label="Workspace settings"><span aria-hidden="true">⚙</span></button>
+      <div class="settings-menu" id="settings-menu" role="group" aria-label="Workspace settings" hidden>
+        <div class="desk-setting">
+          <label class="control-label" for="settings-profile">Agent</label>
+          <select id="settings-profile">
+            <option value="">Manager's choice</option>
+          </select>
+        </div>
+        <div class="desk-setting">
+          <label class="control-label" for="settings-budget">Budget ($)</label>
+          <input id="settings-budget" type="number" min="1" step="1" value="10">
+        </div>
+        <div class="desk-setting">
+          <span class="control-label">Where changes land</span>
+          <div class="seg" id="push-mode" role="group" aria-label="Where changes land">
+            <button type="button" data-mode="pr" class="seg-btn">Pull request</button>
+            <button type="button" data-mode="main" class="seg-btn">Push to main</button>
+          </div>
+        </div>
       </div>
     </div>
-    <div class="control control-accent" id="ctl-accent" hidden>
-      <button type="button" id="accent-toggle" class="ghost-btn accent-btn"
-              aria-haspopup="true" aria-expanded="false" aria-label="Primary colour">
-        <span class="accent-dot" aria-hidden="true"></span>Colour
-      </button>
-      <div class="accent-menu" id="accent-menu" role="menu" aria-label="Primary colour" hidden></div>
-    </div>
-    <button id="show-verified" class="ghost-btn toggle-verified" hidden>Show verified</button>
     <div class="mgr-badge" id="mgr-badge" hidden role="button" tabindex="0"
          title="Manager automation is watching this workspace&#10;Click to run the manager now">
       <span class="pulse" id="mgr-dot"></span> <span id="mgr-text">manager</span>
@@ -82,24 +103,7 @@ export const BOARD_MARKUP = `
           <button type="button" id="new-ticket-attach" class="attach-btn" title="Attach files or images" aria-label="Attach files or images">
             <span aria-hidden="true">📎</span>
           </button>
-          <button type="button" id="new-ticket-settings" class="attach-btn settings-btn"
-                  aria-expanded="false" title="Request settings: agent and budget"
-                  aria-label="Request settings"><span aria-hidden="true">⚙</span></button>
-          <button type="button" id="manager-chat-open" class="ghost-btn talk-btn"
-                  title="Chat with the manager about this board">Talk to the manager</button>
           <button type="submit" id="new-ticket-submit">Send request</button>
-        </div>
-      </div>
-      <div id="new-ticket-settings-panel" class="desk-settings" hidden>
-        <div class="desk-setting">
-          <label class="control-label" for="new-ticket-profile">Agent</label>
-          <select id="new-ticket-profile">
-            <option value="">Manager's choice</option>
-          </select>
-        </div>
-        <div class="desk-setting">
-          <label class="control-label" for="new-ticket-budget">Budget ($)</label>
-          <input id="new-ticket-budget" type="number" min="1" step="1" value="10">
         </div>
       </div>
       <div id="new-ticket-files" class="file-chips" hidden></div>

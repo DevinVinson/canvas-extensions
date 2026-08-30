@@ -194,7 +194,9 @@ export function mountBoard({ container, path, navigate, host }) {
     automation: null,
     dragging: null,
     returnFocus: null,
-    showVerified: readFlag("vibe.showVerified"),
+    // Preferences live on the workspace record in the store; until one is
+    // open the theme falls back to the browser hint the SPA leaves behind.
+    showVerified: false,
     newTicketFiles: [],
     theme: readTheme(),
     pollTimer: null,
@@ -206,17 +208,11 @@ export function mountBoard({ container, path, navigate, host }) {
     chatReturnFocus: null,
   };
 
-  function readFlag(key) {
-    try {
-      return localStorage.getItem(key) === "1";
-    } catch {
-      return false;
-    }
-  }
-
   function readTheme() {
     try {
-      return localStorage.getItem("vibe.theme") === "light" ? "light" : "dark";
+      const hint = localStorage.getItem("vibe.theme.hint")
+        ?? localStorage.getItem("vibe.theme");
+      return hint === "light" ? "light" : "dark";
     } catch {
       return "dark";
     }
@@ -241,9 +237,10 @@ export function mountBoard({ container, path, navigate, host }) {
     $("#empty-state").hidden = true;
     $("#board-wrap").hidden = true;
     $("#ctl-concurrency").hidden = true;
-    $("#ctl-pushmode").hidden = true;
+    $("#ctl-settings").hidden = true;
     $("#ctl-accent").hidden = true;
     $("#show-verified").hidden = true;
+    $("#manager-chat-open").hidden = true;
     $("#mgr-badge").hidden = true;
     $("#mgr-stop").hidden = true;
     const err = $("#api-setup-error");
@@ -437,6 +434,7 @@ export function mountBoard({ container, path, navigate, host }) {
       if (!alive()) return;
       state.ws = ws;
       state.automation = null;
+      adoptWorkspacePrefs();
       persist("vibe.workspace", path);
       syncRoute(historyMode);
       await refreshBoard();
@@ -464,6 +462,7 @@ export function mountBoard({ container, path, navigate, host }) {
       const data = await state.store.getBoard(state.ws.id);
       if (!alive() || state.store.writes !== writes) return;
       state.ws = data.workspace;
+      adoptWorkspacePrefs();
       /* The old service computed these server-side; inside Canvas they come
          from the agent server directly, cached and refreshed in the
          background so a 5s poll never blocks on them. */
@@ -651,11 +650,16 @@ export function mountBoard({ container, path, navigate, host }) {
     $("#empty-state").hidden = has;
     $("#board-wrap").hidden = !has;
     $("#ctl-concurrency").hidden = !has;
-    $("#ctl-pushmode").hidden = !has;
+    $("#ctl-settings").hidden = !has;
     $("#ctl-accent").hidden = !has;
     $("#show-verified").hidden = !has;
-    if (!has) closeAccentMenu();
+    $("#manager-chat-open").hidden = !has;
+    if (!has) {
+      closeAccentMenu();
+      closeSettingsMenu();
+    }
     applyAccent();
+    applyTheme();
     renderMgrBadge();
     if (has) {
       renderBoard();
@@ -663,15 +667,33 @@ export function mountBoard({ container, path, navigate, host }) {
     }
   }
 
+  /* Mirror the workspace's stored settings into the controls. Called on every
+     board poll, so an input the user is editing is left alone. */
   function renderSettings() {
     if (!state.ws) return;
     const mc = $("#max-concurrent");
     if (document.activeElement !== mc) mc.value = state.ws.max_concurrent;
+    const budget = $("#settings-budget");
+    if (document.activeElement !== budget) budget.value = state.ws.max_budget ?? DEFAULT_BUDGET;
+    const profile = $("#settings-profile");
+    if (document.activeElement !== profile) profile.value = state.ws.llm_profile ?? "";
     $$("#push-mode .seg-btn").forEach((b) =>
       b.classList.toggle("active", b.dataset.mode === state.ws.push_mode),
     );
     applyAccent();
+    applyTheme();
+    renderVerifiedToggle();
     renderMgrBadge();
+  }
+
+  /* The workspace record is the source of truth for the UI preferences: adopt
+     them whenever it arrives. */
+  function adoptWorkspacePrefs() {
+    if (!state.ws) return;
+    state.showVerified = !!state.ws.show_verified;
+    // A record written before the theme moved into the store has no theme of
+    // its own; leave the browser's last one alone rather than resetting it.
+    if (state.ws.theme) state.theme = state.ws.theme === "light" ? "light" : "dark";
   }
 
   function modelChip(model) {
@@ -875,19 +897,26 @@ export function mountBoard({ container, path, navigate, host }) {
 
   /* ------------------------------------------------------------- tickets */
 
-  /* The ⚙ panel on the new-request form: which agent runs the ticket and how
-     much it may spend. Defaults are "manager's choice" (empty profile — the
-     manager keeps picking per task) and DEFAULT_BUDGET. */
+  /* The ⚙ popover in the topbar: which agent runs a request, how much it may
+     spend, and where its changes land. All three are workspace settings stored
+     in the workspace record. Defaults are "manager's choice" (empty profile —
+     the manager keeps picking per task) and DEFAULT_BUDGET. */
 
-  function toggleTicketSettings() {
-    const panel = $("#new-ticket-settings-panel");
-    panel.hidden = !panel.hidden;
-    $("#new-ticket-settings").setAttribute("aria-expanded", String(!panel.hidden));
-    $("#new-ticket-settings").classList.toggle("active", !panel.hidden);
+  function toggleSettingsMenu() {
+    const menu = $("#settings-menu");
+    menu.hidden = !menu.hidden;
+    $("#settings-toggle").setAttribute("aria-expanded", String(!menu.hidden));
+    $("#settings-toggle").classList.toggle("active", !menu.hidden);
+  }
+
+  function closeSettingsMenu() {
+    $("#settings-menu").hidden = true;
+    $("#settings-toggle").setAttribute("aria-expanded", "false");
+    $("#settings-toggle").classList.remove("active");
   }
 
   async function loadLLMProfiles() {
-    const sel = $("#new-ticket-profile");
+    const sel = $("#settings-profile");
     let data;
     try {
       data = await state.live.llmProfiles();
@@ -896,7 +925,7 @@ export function mountBoard({ container, path, navigate, host }) {
       return;
     }
     if (!alive()) return;
-    const chosen = sel.value;
+    const chosen = state.ws?.llm_profile ?? sel.value;
     sel.innerHTML = "";
     const managers = document.createElement("option");
     managers.value = "";
@@ -913,9 +942,9 @@ export function mountBoard({ container, path, navigate, host }) {
   }
 
   function ticketSettings() {
-    const budget = parseFloat($("#new-ticket-budget").value);
+    const budget = Number(state.ws?.max_budget);
     return {
-      llm_profile: $("#new-ticket-profile").value || null,
+      llm_profile: state.ws?.llm_profile || null,
       max_budget: Number.isFinite(budget) && budget > 0 ? budget : DEFAULT_BUDGET,
     };
   }
@@ -1000,9 +1029,9 @@ export function mountBoard({ container, path, navigate, host }) {
 
   function toggleVerified() {
     state.showVerified = !state.showVerified;
-    persist("vibe.showVerified", state.showVerified ? "1" : "0");
     renderVerifiedToggle();
     renderBoard();
+    patchWorkspace({ show_verified: state.showVerified });
   }
 
   function renderVerifiedToggle() {
@@ -1276,6 +1305,7 @@ export function mountBoard({ container, path, navigate, host }) {
       const ws = await state.store.updateWorkspace(state.ws.id, patch);
       if (!alive()) return;
       state.ws = ws;
+      adoptWorkspacePrefs();
       renderSettings();
     } catch (e) {
       if (alive()) console.error(`settings failed: ${e.message}`);
@@ -1370,7 +1400,6 @@ export function mountBoard({ container, path, navigate, host }) {
     on($("#new-ticket-body"), "keydown", ticketKeydown(submitTicket));
 
     on($("#new-ticket-attach"), "click", () => $("#new-ticket-file-input").click());
-    on($("#new-ticket-settings"), "click", toggleTicketSettings);
     on($("#new-ticket-file-input"), "change", (e) => {
       state.newTicketFiles.push(...e.target.files);
       e.target.value = "";
@@ -1412,6 +1441,7 @@ export function mountBoard({ container, path, navigate, host }) {
     on(document, "keydown", (e) => {
       if (e.key !== "Escape") return;
       closeAccentMenu();
+      closeSettingsMenu();
       closeManagerChat();
       closeDrawer();
     });
@@ -1423,6 +1453,22 @@ export function mountBoard({ container, path, navigate, host }) {
     $$("#push-mode .seg-btn").forEach((b) =>
       on(b, "click", () => patchWorkspace({ push_mode: b.dataset.mode })),
     );
+
+    on($("#settings-toggle"), "click", (e) => {
+      e.stopPropagation();
+      toggleSettingsMenu();
+    });
+    on(document, "click", (e) => {
+      if (!e.target?.closest?.(".control-settings")) closeSettingsMenu();
+    });
+    // "" = manager's choice: the patch clears the stored profile.
+    on($("#settings-profile"), "change", (e) =>
+      patchWorkspace({ llm_profile: e.target.value || null }),
+    );
+    on($("#settings-budget"), "change", (e) => {
+      const v = parseFloat(e.target.value);
+      if (v > 0) patchWorkspace({ max_budget: v });
+    });
 
     on($("#show-verified"), "click", toggleVerified);
     renderVerifiedToggle();

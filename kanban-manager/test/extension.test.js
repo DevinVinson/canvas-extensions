@@ -466,6 +466,62 @@ describe("mount", () => {
     dispose();
   });
 
+  /* Preferences are workspace settings in the store, not browser state: the
+     board adopts the record's theme and writes a toggle straight back to it. */
+  it("takes the theme and the verified toggle from the workspace record", async () => {
+    dom.store.clear();
+    const home = "/home/tester";
+    const root = `${home}/.openhands/vibe-manager`;
+    const indexPath = `${root}/index.json`;
+    const workspace = {
+      id: "w1",
+      name: "demo",
+      path: "/git/demo",
+      max_concurrent: 2,
+      theme: "light",
+      show_verified: false,
+    };
+    const { host, disk } = hostWithStore({
+      home,
+      files: {
+        [indexPath]: { workspaces: [workspace] },
+        [`${root}/workspaces/w1/board.json`]: { tickets: [] },
+      },
+    });
+
+    const container = makeContainer();
+    const dispose = mountBoard({ container, path: "demo", navigate: () => {}, host });
+    const extRoot = container.querySelector(".vibe-ext");
+    await waitFor(() => extRoot.getAttribute("data-theme") === "light");
+
+    container.querySelector("#show-verified").dispatchEvent(
+      new dom.window.Event("click", { bubbles: true }),
+    );
+    await waitFor(() => disk.get(indexPath)?.workspaces[0].show_verified === true);
+    dispose();
+  });
+
+  /* The control is deliberately unlabelled and sits with the workspace it
+     belongs to, so its identity is "the dot beside the workspace picker". */
+  it("puts the primary-colour picker beside the workspace picker, as a bare dot", async () => {
+    dom.store.clear();
+    const container = makeContainer();
+    const dispose = mountBoard({
+      container,
+      path: "",
+      navigate: () => {},
+      host: hostWithStore().host,
+    });
+
+    const picker = container.querySelector(".control-workspace");
+    assert.equal(picker.nextElementSibling.id, "ctl-accent");
+    const toggle = container.querySelector("#accent-toggle");
+    assert.equal(toggle.textContent.trim(), "", "no text label, just the dot");
+    assert.ok(toggle.querySelector(".accent-dot"));
+    assert.equal(toggle.getAttribute("aria-label"), "Primary colour");
+    dispose();
+  });
+
   it("falls back to the default primary for a workspace without one", async () => {
     dom.store.clear();
     const home = "/home/tester";
@@ -589,7 +645,7 @@ describe("mount", () => {
           active_profile: "opus",
         },
       });
-      const options = () => [...container.querySelectorAll("#new-ticket-profile option")];
+      const options = () => [...container.querySelectorAll("#settings-profile option")];
       await waitFor(() => options().length === 3);
       assert.deepEqual(
         options().map((o) => [o.getAttribute("value"), o.textContent]),
@@ -598,25 +654,39 @@ describe("mount", () => {
       dispose();
     });
 
-    it("records the requested agent and budget on the ticket", async () => {
+    it("stores the agent and budget on the workspace and uses them for tickets", async () => {
       const { container, disk, dispose } = await mountWithComposer({
         profiles: {
           profiles: [{ name: "opus", model: "anthropic/claude-opus-5" }],
           active_profile: "opus",
         },
       });
-      const panel = container.querySelector("#new-ticket-settings-panel");
-      assert.equal(panel.hasAttribute("hidden"), true, "settings start collapsed");
-      container.querySelector("#new-ticket-settings").dispatchEvent(
+      const menu = container.querySelector("#settings-menu");
+      assert.equal(menu.hasAttribute("hidden"), true, "settings start collapsed");
+      container.querySelector("#settings-toggle").dispatchEvent(
         new dom.window.Event("click", { bubbles: true }),
       );
-      assert.equal(panel.hasAttribute("hidden"), false, "the ⚙ button reveals them");
+      assert.equal(menu.hasAttribute("hidden"), false, "the ⚙ button reveals them");
+      assert.ok(
+        container.querySelector("#settings-menu #push-mode"),
+        "where changes land lives in the settings popover",
+      );
 
       await waitFor(
-        () => container.querySelectorAll("#new-ticket-profile option").length === 2,
+        () => container.querySelectorAll("#settings-profile option").length === 2,
       );
-      container.querySelector("#new-ticket-profile").value = "opus";
-      container.querySelector("#new-ticket-budget").value = "25";
+      const profile = container.querySelector("#settings-profile");
+      profile.value = "opus";
+      profile.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+      const budget = container.querySelector("#settings-budget");
+      budget.value = "25";
+      budget.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+
+      // The settings are the workspace's, not the form's: they land in the store.
+      const indexPath = `${root}/index.json`;
+      await waitFor(() => disk.get(indexPath)?.workspaces[0].llm_profile === "opus");
+      await waitFor(() => disk.get(indexPath)?.workspaces[0].max_budget === 25);
+
       container.querySelector("#new-ticket-body").value = "spare no expense";
       container.querySelector("#new-ticket-form").dispatchEvent(
         new dom.window.Event("submit", { bubbles: true, cancelable: true }),

@@ -6,9 +6,12 @@
    one of the two blocks, or light mode breaks.
 
    The primary colour is per workspace: one of ten, written to <html> as
-   data-accent. Only --accent switches; every surface, line, text and control
-   token is a fixed neutral base washed with it through color-mix, so the whole
-   theme shifts from one declaration and both modes stay in step. Lane hues are
+   data-accent. It is not a garnish — it IS the background. Only --accent
+   switches; every surface, line, text and control token is that one hue held
+   at a fixed lightness and chroma (`oklch(from var(--accent) L C h)`), so all
+   ten palettes are the same design in a different hue and both modes stay in
+   step. --tone-bg is the app background step, shared with the picker swatches
+   so a swatch shows the exact background it will give you. Lane hues are
    deliberately NOT accent-derived — they encode status, so they must not drift
    into each other when the primary happens to sit on a lane's hue. */
 
@@ -26,19 +29,20 @@
   --accent-slate: #8d93b8;
   --accent: var(--accent-ember);
 
-  /* surfaces */
-  --ink: color-mix(in oklab, var(--accent) 14%, #040118);
-  --slab: color-mix(in oklab, var(--accent) 15%, #0b0526);
-  --card: color-mix(in oklab, var(--accent) 16%, #130b30);
-  --card-hi: color-mix(in oklab, var(--accent) 18%, #1a113b);
-  --field: color-mix(in oklab, var(--accent) 14%, #090423);
-  --line: color-mix(in oklab, var(--accent) 22%, #1d1440);
-  --line-soft: color-mix(in oklab, var(--accent) 18%, #150e32);
+  /* surfaces: the primary, deep */
+  --tone-bg: .205 .05;
+  --ink: oklch(from var(--accent) var(--tone-bg) h);
+  --slab: oklch(from var(--accent) .25 .052 h);
+  --card: oklch(from var(--accent) .295 .055 h);
+  --card-hi: oklch(from var(--accent) .345 .06 h);
+  --field: oklch(from var(--accent) .235 .048 h);
+  --line: oklch(from var(--accent) .42 .062 h);
+  --line-soft: oklch(from var(--accent) .33 .055 h);
 
   /* text */
-  --text: color-mix(in oklab, var(--accent) 8%, #f0effa);
-  --text-dim: color-mix(in oklab, var(--accent) 18%, #9c9ac2);
-  --text-faint: color-mix(in oklab, var(--accent) 22%, #605c8a);
+  --text: oklch(from var(--accent) .95 .028 h);
+  --text-dim: oklch(from var(--accent) .755 .042 h);
+  --text-faint: oklch(from var(--accent) .585 .045 h);
 
   /* lanes */
   --lane-pending: #8d93b8;
@@ -55,11 +59,11 @@
   --danger-line: rgba(255, 111, 139, .38);
 
   /* neutral controls */
-  --btn-bg: color-mix(in oklab, var(--accent) 9%, #f1f0fb);
-  --btn-bg-hover: color-mix(in oklab, var(--accent) 7%, #ffffff);
-  --btn-text: color-mix(in oklab, var(--accent) 14%, #080321);
-  --ghost-bg: color-mix(in oklab, var(--accent) 18%, #0e0629);
-  --ghost-bg-hover: color-mix(in oklab, var(--accent) 20%, #170d38);
+  --btn-bg: oklch(from var(--accent) .95 .032 h);
+  --btn-bg-hover: oklch(from var(--accent) .99 .018 h);
+  --btn-text: oklch(from var(--accent) .225 .055 h);
+  --ghost-bg: oklch(from var(--accent) .285 .055 h);
+  --ghost-bg-hover: oklch(from var(--accent) .35 .06 h);
 
   /* chrome */
   --topbar-bg: color-mix(in srgb, var(--ink) 88%, transparent);
@@ -82,9 +86,9 @@
 }
 
 html[data-theme="light"] {
-  /* cool paper: muted surfaces, no pure white cards, eased near-black text.
-     The primaries are restated darker here so they carry on paper; the mixes
-     below then land on soft off-white washes of whichever one is selected. */
+  /* the same hue, pale: the primary tinted paper rather than white. The
+     primaries are restated darker here so they still carry as a flare on
+     paper; only their hue reaches the surfaces. */
   --accent-ember: #d1552a;
   --accent-amber: #a2701c;
   --accent-citron: #6c7a1c;
@@ -96,17 +100,18 @@ html[data-theme="light"] {
   --accent-rose: #bc4576;
   --accent-slate: #5a6187;
 
-  --ink: color-mix(in oklab, var(--accent) 14%, #ffffff);
-  --slab: color-mix(in oklab, var(--accent) 12%, #ffffff);
-  --card: color-mix(in oklab, var(--accent) 10%, #ffffff);
-  --card-hi: color-mix(in oklab, var(--accent) 13%, #ffffff);
-  --field: color-mix(in oklab, var(--accent) 9%, #ffffff);
-  --line: color-mix(in oklab, var(--accent) 18%, #f2f2fe);
-  --line-soft: color-mix(in oklab, var(--accent) 14%, #f8f7ff);
+  --tone-bg: .935 .038;
+  --ink: oklch(from var(--accent) var(--tone-bg) h);
+  --slab: oklch(from var(--accent) .965 .026 h);
+  --card: oklch(from var(--accent) .982 .017 h);
+  --card-hi: oklch(from var(--accent) .955 .03 h);
+  --field: oklch(from var(--accent) .99 .012 h);
+  --line: oklch(from var(--accent) .885 .045 h);
+  --line-soft: oklch(from var(--accent) .93 .032 h);
 
-  --text: color-mix(in oklab, var(--accent) 10%, #24223a);
-  --text-dim: color-mix(in oklab, var(--accent) 16%, #5d597c);
-  --text-faint: color-mix(in oklab, var(--accent) 20%, #9692b7);
+  --text: oklch(from var(--accent) .30 .045 h);
+  --text-dim: oklch(from var(--accent) .515 .05 h);
+  --text-faint: oklch(from var(--accent) .685 .045 h);
 
   --lane-pending: #767ca3;
   --lane-progress: #1c8f83;
@@ -119,11 +124,11 @@ html[data-theme="light"] {
   --danger: #bc4560;
   --danger-line: rgba(188, 69, 96, .32);
 
-  --btn-bg: color-mix(in oklab, var(--accent) 16%, #1f1d35);
-  --btn-bg-hover: color-mix(in oklab, var(--accent) 18%, #2d2a4b);
-  --btn-text: color-mix(in oklab, var(--accent) 8%, #ffffff);
-  --ghost-bg: color-mix(in oklab, var(--accent) 14%, #ffffff);
-  --ghost-bg-hover: color-mix(in oklab, var(--accent) 16%, #f6f7ff);
+  --btn-bg: oklch(from var(--accent) .33 .06 h);
+  --btn-bg-hover: oklch(from var(--accent) .40 .065 h);
+  --btn-text: oklch(from var(--accent) .985 .015 h);
+  --ghost-bg: oklch(from var(--accent) .972 .024 h);
+  --ghost-bg-hover: oklch(from var(--accent) .935 .036 h);
 
   --topbar-bg: color-mix(in srgb, var(--slab) 90%, transparent);
   --backdrop: color-mix(in srgb, var(--text) 26%, transparent);
@@ -217,6 +222,7 @@ select:hover, input[type=number]:hover { border-color: var(--text-faint); }
 .seg-btn {
   background: transparent; color: var(--text-dim); border: 0;
   padding: 7px 12px; font-family: var(--sans); font-size: 0.75rem; cursor: pointer;
+  white-space: nowrap;
 }
 .seg-btn:hover { color: var(--text); background: var(--ghost-bg-hover); }
 .seg-btn.active { background: var(--btn-bg); color: var(--btn-text); font-weight: 600; }
@@ -233,22 +239,27 @@ select:hover, input[type=number]:hover { border-color: var(--text-faint); }
 }
 
 /* ------------------------------------------------------- primary colour */
+/* The control is a bare dot in the current primary — no label, since the dot
+   is the thing. Each swatch is filled with the background that primary
+   actually paints (--tone-bg, the same step --ink uses) and rimmed in the
+   primary itself, so the menu is ten previews rather than ten stickers. */
 .control-accent { position: relative; }
-.accent-btn { display: inline-flex; align-items: center; gap: var(--s2); }
+.accent-btn { padding: 10px; border-radius: 50%; line-height: 0; }
 .accent-dot {
-  width: 11px; height: 11px; border-radius: 50%; flex: none;
+  display: block; width: 1rem; height: 1rem; border-radius: 50%; flex: none;
   background: var(--accent); box-shadow: 0 0 0 1px var(--line);
 }
 .accent-menu {
-  position: absolute; top: calc(100% + var(--s2)); right: 0; z-index: 30;
+  position: absolute; top: calc(100% + var(--s2)); left: 0; z-index: 30;
   display: grid; grid-template-columns: repeat(5, auto); gap: var(--s2);
   padding: var(--s3); border-radius: var(--r-md);
   background: var(--slab); border: 1px solid var(--line);
   box-shadow: var(--shadow-panel);
 }
 .accent-swatch {
-  width: 20px; height: 20px; padding: 0; border-radius: 50%; cursor: pointer;
-  background: var(--swatch); border: 1px solid var(--line-soft);
+  width: 24px; height: 24px; padding: 0; border-radius: 50%; cursor: pointer;
+  background: oklch(from var(--swatch) var(--tone-bg) h);
+  border: 3px solid var(--swatch);
   transition: transform .12s;
 }
 .accent-swatch:hover { transform: scale(1.15); }
@@ -265,6 +276,25 @@ select:hover, input[type=number]:hover { border-color: var(--text-faint); }
 .accent-swatch[data-accent="orchid"] { --swatch: var(--accent-orchid); }
 .accent-swatch[data-accent="rose"] { --swatch: var(--accent-rose); }
 .accent-swatch[data-accent="slate"] { --swatch: var(--accent-slate); }
+
+/* ---------------------------------------------------- workspace settings */
+/* Everything the workspace remembers that isn't a one-click control lives in
+   this ⚙ popover: which agent runs a request, its budget, and where changes
+   land. */
+.control-settings { position: relative; }
+.settings-btn { padding: 8px 12px; font-size: 0.9375rem; line-height: 1; }
+.settings-btn.active {
+  color: var(--text); background: var(--ghost-bg-hover); border-color: var(--text-faint);
+}
+.settings-menu {
+  position: absolute; top: calc(100% + var(--s2)); right: 0; z-index: 30;
+  display: flex; flex-direction: column; gap: var(--s3);
+  padding: var(--s4); border-radius: var(--r-md);
+  background: var(--slab); border: 1px solid var(--line);
+  box-shadow: var(--shadow-panel);
+}
+.desk-setting { display: flex; align-items: center; gap: var(--s3); justify-content: space-between; }
+.desk-setting select { min-width: 12rem; }
 
 .mgr-badge {
   display: flex; align-items: center; gap: var(--s2);
@@ -339,16 +369,6 @@ select:hover, input[type=number]:hover { border-color: var(--text-faint); }
 }
 .attach-btn:hover { background: var(--ghost-bg-hover); border-color: var(--text-faint); }
 .talk-btn { white-space: nowrap; }
-.settings-btn.active {
-  color: var(--text); background: var(--ghost-bg-hover); border-color: var(--text-faint);
-}
-
-.desk-settings {
-  display: flex; flex-wrap: wrap; gap: var(--s4);
-  padding-top: var(--s3); border-top: 1px solid var(--line-soft);
-}
-.desk-setting { display: flex; align-items: center; gap: var(--s2); }
-.desk-setting select { min-width: 12rem; }
 
 #new-ticket-submit, #append-form button[type=submit] {
   background: var(--btn-bg); color: var(--btn-text); border: 0;
