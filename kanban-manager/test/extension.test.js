@@ -1048,6 +1048,84 @@ describe("worker activity indicator", () => {
   });
 });
 
+describe("budget and spend", () => {
+  const home = "/home/tester";
+  const root = `${home}/.openhands/vibe-manager`;
+
+  function conversation(spends) {
+    return {
+      execution_status: "running",
+      agent: { llm: { model: "anthropic/claude-fable-5" } },
+      stats: {
+        usage_to_metrics: Object.fromEntries(
+          Object.entries(spends).map(([usage, cost]) => [usage, { accumulated_cost: cost }]),
+        ),
+      },
+    };
+  }
+
+  function ticket(id, convId, maxBudget) {
+    return {
+      id,
+      status: convId ? "in_progress" : "pending",
+      conversation_id: convId,
+      max_budget: maxBudget,
+      entries: [{ id: `e-${id}`, author: "user", body: "spend wisely", created_at: 1 }],
+    };
+  }
+
+  /* The card has to answer "what is this ticket allowed to spend, and what has
+     it spent?" — the same total the poller pauses a worker at. */
+  it("shows spend against the budget on every card", async () => {
+    dom.store.clear();
+    const { host } = hostWithStore({
+      home,
+      files: {
+        [`${root}/index.json`]: {
+          workspaces: [{ id: "w1", name: "demo", path: "/git/demo", max_concurrent: 3 }],
+        },
+        [`${root}/workspaces/w1/board.json`]: {
+          tickets: [
+            ticket("t-spend", "c-spend", 25),
+            ticket("t-over", "c-over", 10),
+            ticket("t-idle", null, 10),
+          ],
+        },
+      },
+      conversations: {
+        // Two LLMs on one conversation: the chip shows their sum.
+        "c-spend": conversation({ default: 4, condenser: 0.25 }),
+        "c-over": conversation({ default: 12.5 }),
+      },
+    });
+
+    const container = makeContainer();
+    const dispose = mountBoard({ container, path: "demo", navigate: () => {}, host });
+    const chip = (id) => container.querySelector(`.card[data-id="${id}"] .chip.budget`);
+    try {
+      // A ticket with no conversation has nothing to fetch: it reports $0.00
+      // of its budget as soon as the board renders.
+      await waitFor(() => chip("t-idle"));
+      assert.equal(chip("t-idle").textContent, "$0.00 / $10.00");
+
+      // The spends are fetched in the background, so they reach the DOM on the
+      // next 5s board poll.
+      await waitFor(() => chip("t-spend")?.textContent === "$4.25 / $25.00", 8000);
+      assert.equal(
+        chip("t-spend").getAttribute("title"),
+        "spent $4.25 of the $25.00 budget",
+      );
+      assert.equal(chip("t-spend").classList.contains("over"), false);
+
+      assert.equal(chip("t-over").textContent, "$12.50 / $10.00");
+      assert.ok(chip("t-over").classList.contains("over"), "a ticket past its cap stands out");
+      assert.equal(chip("t-idle").classList.contains("over"), false);
+    } finally {
+      dispose();
+    }
+  });
+});
+
 describe("talk to the manager", () => {
   const home = "/home/tester";
   const root = `${home}/.openhands/vibe-manager`;

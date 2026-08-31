@@ -1,7 +1,8 @@
 /* Everything the board derives at read time rather than storing on disk:
-   automation health, per-conversation action summaries, and LLM model names.
+   automation health, per-conversation action summaries, LLM model names and
+   what each conversation has spent.
 
-   All three used to be computed server-side by the vibe-manager service. They
+   They all used to be computed server-side by the vibe-manager service. They
    are derived here instead so they cannot go stale in the store, and they all
    go through the Canvas host client, which attaches the session key.
 
@@ -38,6 +39,20 @@ class TtlCache {
   }
 }
 
+/* Total USD a conversation has spent, across every LLM it used — the same sum
+   automation/main.py's conversation_spend() enforces budgets with, so the
+   board shows the number the cap is judged against. */
+export function conversationSpend(conv) {
+  const usage = conv?.stats?.usage_to_metrics;
+  if (!usage || typeof usage !== "object") return 0;
+  let total = 0;
+  for (const metrics of Object.values(usage)) {
+    const cost = Number(metrics?.accumulated_cost);
+    if (Number.isFinite(cost)) total += cost;
+  }
+  return total;
+}
+
 function runSlim(run) {
   if (!run) return null;
   const out = {};
@@ -54,6 +69,10 @@ export class Live {
     // Short TTL: the live/done indicator has to flip promptly once a worker ends.
     this.statuses = new TtlCache(10 * 1000);
     this.summaries = new TtlCache(10 * 1000);
+    // A worker only spends while it runs, and a running worker is already
+    // refreshed on the status TTL above; this keeps parked cards from
+    // re-polling on every board render.
+    this.spends = new TtlCache(60 * 1000);
     this.inFlight = new Set();
   }
 
@@ -204,10 +223,11 @@ export class Live {
     return this.summaries.peek(convId) ?? null;
   }
 
-  // ------------------------------------------- model + execution status
+  // ------------------------------- model + execution status + spend
 
-  /* One conversation-metadata GET feeds both caches, so a card that shows the
-     model and the live/done indicator still costs a single request. */
+  /* One conversation-metadata GET feeds all three caches, so a card that shows
+     the model, the live/done indicator and the spend still costs a single
+     request. */
   refreshConversation(convId, sticky) {
     const key = `conv:${convId}`;
     if (this.inFlight.has(key)) return;
@@ -219,11 +239,13 @@ export class Live {
         if (model) this.models.set(convId, model, sticky);
         else this.models.set(convId, this.models.peek(convId) ?? null);
         this.statuses.set(convId, conv?.execution_status || null);
+        this.spends.set(convId, conversationSpend(conv), sticky);
       })
       // A failed refetch keeps the last known values rather than blanking them.
       .catch(() => {
         this.models.set(convId, this.models.peek(convId) ?? null);
         this.statuses.set(convId, this.statuses.peek(convId) ?? null);
+        this.spends.set(convId, this.spends.peek(convId) ?? null);
       })
       .finally(() => this.inFlight.delete(key));
   }
@@ -244,6 +266,15 @@ export class Live {
     if (cached !== undefined) return cached;
     this.refreshConversation(convId, false);
     return this.statuses.peek(convId) ?? null;
+  }
+
+  /** Cached USD spend. Terminal tickets are sticky: they spend no more. */
+  spendUsd(convId, sticky = false) {
+    if (!convId) return null;
+    const cached = this.spends.get(convId);
+    if (cached !== undefined) return cached;
+    this.refreshConversation(convId, sticky);
+    return this.spends.peek(convId) ?? null;
   }
 
   /** The agent server's LLM profiles, for the request-settings picker. */
@@ -280,6 +311,9 @@ export class Live {
           : null,
       llm_model: t.conversation_id
         ? this.llmModel(t.conversation_id, ["finished", "verified"].includes(t.status))
+        : null,
+      spend_usd: t.conversation_id
+        ? this.spendUsd(t.conversation_id, ["finished", "verified"].includes(t.status))
         : null,
     }));
   }
