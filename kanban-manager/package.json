@@ -1,11 +1,11 @@
 {
-  "name": "vibe-board-canvas-extension",
-  "version": "0.1.0",
+  "name": "kanban-manager-canvas-extension",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "scripts": {
     "build": "node build.mjs",
-    "test": "node --test src/extension.test.js",
+    "test": "node --test test/extension.test.js test/manager.test.mjs",
     "check": "npm run build && npm test"
   },
   "devDependencies": {

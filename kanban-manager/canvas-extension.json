@@ -1,17 +1,17 @@
 {
   "schema_version": 1,
-  "name": "vibe-board",
-  "display_name": "Vibe",
-  "version": "0.1.0",
+  "name": "kanban-manager",
+  "display_name": "Kanban Manager",
+  "version": "0.2.0",
   "description": "Agent dispatch board: queue work, watch agents pick it up, review what lands.",
   "entrypoint": "extension.js",
   "contributes": {
     "pages": [
       {
         "id": "board",
-        "title": "Vibe",
+        "title": "Kanban Manager",
         "path": "/board",
-        "nav_label": "Vibe",
+        "nav_label": "Kanban Manager",
         "description": "Kanban board of agent work across your workspaces."
       }
     ]
