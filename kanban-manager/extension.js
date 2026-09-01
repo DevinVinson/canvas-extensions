@@ -917,6 +917,16 @@ var TtlCache = class {
     this.entries.set(key, { value, at: Date.now(), sticky });
   }
 };
+function conversationSpend(conv) {
+  const usage = conv?.stats?.usage_to_metrics;
+  if (!usage || typeof usage !== "object") return 0;
+  let total = 0;
+  for (const metrics of Object.values(usage)) {
+    const cost = Number(metrics?.accumulated_cost);
+    if (Number.isFinite(cost)) total += cost;
+  }
+  return total;
+}
 function runSlim(run) {
   if (!run) return null;
   const out = {};
@@ -931,6 +941,7 @@ var Live = class {
     this.models = new TtlCache(5 * 60 * 1e3);
     this.statuses = new TtlCache(10 * 1e3);
     this.summaries = new TtlCache(10 * 1e3);
+    this.spends = new TtlCache(60 * 1e3);
     this.inFlight = /* @__PURE__ */ new Set();
   }
   // ------------------------------------------------------------- automation
@@ -1061,9 +1072,10 @@ var Live = class {
     }
     return this.summaries.peek(convId) ?? null;
   }
-  // ------------------------------------------- model + execution status
-  /* One conversation-metadata GET feeds both caches, so a card that shows the
-     model and the live/done indicator still costs a single request. */
+  // ------------------------------- model + execution status + spend
+  /* One conversation-metadata GET feeds all three caches, so a card that shows
+     the model, the live/done indicator and the spend still costs a single
+     request. */
   refreshConversation(convId, sticky) {
     const key = `conv:${convId}`;
     if (this.inFlight.has(key)) return;
@@ -1073,9 +1085,11 @@ var Live = class {
       if (model) this.models.set(convId, model, sticky);
       else this.models.set(convId, this.models.peek(convId) ?? null);
       this.statuses.set(convId, conv?.execution_status || null);
+      this.spends.set(convId, conversationSpend(conv), sticky);
     }).catch(() => {
       this.models.set(convId, this.models.peek(convId) ?? null);
       this.statuses.set(convId, this.statuses.peek(convId) ?? null);
+      this.spends.set(convId, this.spends.peek(convId) ?? null);
     }).finally(() => this.inFlight.delete(key));
   }
   /** Cached model name. Terminal tickets are sticky: never refetched. */
@@ -1093,6 +1107,14 @@ var Live = class {
     if (cached !== void 0) return cached;
     this.refreshConversation(convId, false);
     return this.statuses.peek(convId) ?? null;
+  }
+  /** Cached USD spend. Terminal tickets are sticky: they spend no more. */
+  spendUsd(convId, sticky = false) {
+    if (!convId) return null;
+    const cached = this.spends.get(convId);
+    if (cached !== void 0) return cached;
+    this.refreshConversation(convId, sticky);
+    return this.spends.peek(convId) ?? null;
   }
   /** The agent server's LLM profiles, for the request-settings picker. */
   async llmProfiles() {
@@ -1115,7 +1137,8 @@ var Live = class {
       conversation_url: t.conversation_id ? `${canvasBase}/conversations/${t.conversation_id}` : null,
       latest_action: t.status === "in_progress" && t.conversation_id ? this.latestAction(t.conversation_id) : null,
       conversation_status: t.status === "in_progress" && t.conversation_id ? this.conversationStatus(t.conversation_id) : null,
-      llm_model: t.conversation_id ? this.llmModel(t.conversation_id, ["finished", "verified"].includes(t.status)) : null
+      llm_model: t.conversation_id ? this.llmModel(t.conversation_id, ["finished", "verified"].includes(t.status)) : null,
+      spend_usd: t.conversation_id ? this.spendUsd(t.conversation_id, ["finished", "verified"].includes(t.status)) : null
     }));
   }
 };
@@ -1947,6 +1970,9 @@ var EXTENSION_CSS = true ? `.vibe-ext { --vibe-rem: 1.2rem; }
 .vibe-ext .chip.pr { color: var(--lane-input); }
 .vibe-ext .chip.verified { color: var(--lane-verified); }
 .vibe-ext .chip.model { color: var(--lane-done); }
+/* spend vs. budget: neutral until the cap the poller pauses workers at */
+.vibe-ext .chip.budget { color: var(--text-dim); }
+.vibe-ext .chip.budget.over { color: var(--danger); border-color: var(--danger-line); }
 /* counts and timestamps are plain facts, not pills */
 .vibe-ext .chip.entries, .vibe-ext .chip.attachments, .vibe-ext .chip.verified {
   border-color: transparent; padding-left: 0; padding-right: 0;
@@ -2827,6 +2853,28 @@ ${TRIGGER_HINT}`;
     chip.textContent = `\u25C6 ${shortModel(model)}`;
     return chip;
   }
+  function fmtUsd(n) {
+    return `$${Number(n).toFixed(2)}`;
+  }
+  function budgetChip(t) {
+    const budget = Number(t.max_budget);
+    const hasBudget = Number.isFinite(budget) && budget > 0;
+    const spend = t.spend_usd == null ? null : Number(t.spend_usd);
+    const hasSpend = spend !== null && Number.isFinite(spend);
+    if (!hasBudget && !hasSpend) return null;
+    const spent = hasSpend ? spend : 0;
+    const chip = document.createElement("span");
+    chip.className = "chip budget";
+    if (hasBudget) {
+      chip.textContent = `${fmtUsd(spent)} / ${fmtUsd(budget)}`;
+      chip.title = `spent ${fmtUsd(spent)} of the ${fmtUsd(budget)} budget`;
+      if (spent >= budget) chip.classList.add("over");
+    } else {
+      chip.textContent = fmtUsd(spent);
+      chip.title = `spent ${fmtUsd(spent)} \u2014 no budget set`;
+    }
+    return chip;
+  }
   function cardEl(t) {
     const firstEntry = t.entries[0]?.body ?? "";
     const el = document.createElement("div");
@@ -2870,6 +2918,8 @@ ${TRIGGER_HINT}`;
     id.textContent = `#${t.id.slice(0, 6)}`;
     meta.appendChild(id);
     if (t.llm_model) meta.appendChild(modelChip(t.llm_model));
+    const budget = budgetChip(t);
+    if (budget) meta.appendChild(budget);
     if (t.status === "verified" && t.verified_at) {
       const when = document.createElement("span");
       when.className = "chip verified";
@@ -3168,6 +3218,8 @@ ${TRIGGER_HINT}`;
       links.appendChild(a);
     }
     if (t.llm_model) links.appendChild(modelChip(t.llm_model));
+    const budget = budgetChip(t);
+    if (budget) links.appendChild(budget);
     const note = $("#drawer-note");
     note.hidden = !t.manager_note;
     note.textContent = t.manager_note ? `\u2691 manager: ${t.manager_note}` : "";

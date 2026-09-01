@@ -527,6 +527,9 @@ select:hover, input[type=number]:hover { border-color: var(--text-faint); }
 .chip.pr { color: var(--lane-input); }
 .chip.verified { color: var(--lane-verified); }
 .chip.model { color: var(--lane-done); }
+/* spend vs. budget: neutral until the cap the poller pauses workers at */
+.chip.budget { color: var(--text-dim); }
+.chip.budget.over { color: var(--danger); border-color: var(--danger-line); }
 /* counts and timestamps are plain facts, not pills */
 .chip.entries, .chip.attachments, .chip.verified {
   border-color: transparent; padding-left: 0; padding-right: 0;
