@@ -8411,15 +8411,15 @@ function Ae(e, t) {
 	let n = `/conversations/${encodeURIComponent(e)}`;
 	return t ? `${n}?backend=${encodeURIComponent(t)}` : n;
 }
-function je({ host: e, conversationId: t, children: n }) {
-	let r = Ae(t, e.backend.id);
+function je({ host: e, conversationId: t, navigate: n, children: r }) {
+	let i = Ae(t, e.backend.id);
 	return /* @__PURE__ */ (0, O.jsx)("a", {
 		className: "css-conversation-link",
-		href: r,
-		onClick: (t) => {
-			t.button !== 0 || t.metaKey || t.ctrlKey || t.shiftKey || t.altKey || (t.preventDefault(), e.navigate(r));
+		href: i,
+		onClick: (e) => {
+			e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || (e.preventDefault(), n(i));
 		},
-		children: n
+		children: r
 	});
 }
 function Me({ view: e, ready: t, running: n, navigate: r }) {
@@ -8643,7 +8643,7 @@ function Fe({ status: e }) {
 		]
 	});
 }
-function Ie({ host: e, hit: t, close: n }) {
+function Ie({ host: e, hit: t, navigate: n, close: r }) {
 	return /* @__PURE__ */ (0, O.jsxs)("aside", {
 		className: "css-inspector",
 		"aria-label": "Indexed event inspector",
@@ -8651,7 +8651,7 @@ function Ie({ host: e, hit: t, close: n }) {
 			/* @__PURE__ */ (0, O.jsx)("button", {
 				type: "button",
 				className: "css-close",
-				onClick: n,
+				onClick: r,
 				"aria-label": "Close inspector",
 				children: "×"
 			}),
@@ -8662,12 +8662,14 @@ function Ie({ host: e, hit: t, close: n }) {
 			/* @__PURE__ */ (0, O.jsx)("h2", { children: /* @__PURE__ */ (0, O.jsx)(je, {
 				host: e,
 				conversationId: t.conversationId,
+				navigate: n,
 				children: t.title || "Untitled conversation"
 			}) }),
 			/* @__PURE__ */ (0, O.jsxs)("dl", { children: [
 				/* @__PURE__ */ (0, O.jsxs)("div", { children: [/* @__PURE__ */ (0, O.jsx)("dt", { children: "Conversation" }), /* @__PURE__ */ (0, O.jsx)("dd", { children: /* @__PURE__ */ (0, O.jsx)(je, {
 					host: e,
 					conversationId: t.conversationId,
+					navigate: n,
 					children: t.conversationId
 				}) })] }),
 				/* @__PURE__ */ (0, O.jsxs)("div", { children: [/* @__PURE__ */ (0, O.jsx)("dt", { children: "Event" }), /* @__PURE__ */ (0, O.jsx)("dd", { children: t.eventId })] }),
@@ -8689,25 +8691,25 @@ function Ie({ host: e, hit: t, close: n }) {
 		]
 	});
 }
-function Le({ host: e, home: t, status: n, setStatus: r, signal: i }) {
-	let [a, o] = (0, l.useState)(""), [s, c] = (0, l.useState)({}), [u, d] = (0, l.useState)(null), [f, p] = (0, l.useState)(null), [m, h] = (0, l.useState)(""), [g, _] = (0, l.useState)(""), v = n.service.running ? "rpc" : "once", y = async (n) => {
-		n?.preventDefault(), h("Searching…"), _("");
+function Le({ host: e, home: t, status: n, setStatus: r, navigate: i, signal: a }) {
+	let [o, s] = (0, l.useState)(""), [c, u] = (0, l.useState)({}), [d, f] = (0, l.useState)(null), [p, m] = (0, l.useState)(null), [h, g] = (0, l.useState)(""), [_, v] = (0, l.useState)(""), y = n.service.running ? "rpc" : "once", b = async (n) => {
+		n?.preventDefault(), g("Searching…"), v("");
 		try {
-			let n = await ye(e, t, a, s, v, i);
-			d(n), r(n.status);
+			let n = await ye(e, t, o, c, y, a);
+			f(n), r(n.status);
 		} catch (e) {
-			De(e) || _(Ee(e));
+			De(e) || v(Ee(e));
 		} finally {
-			h("");
+			g("");
 		}
-	}, b = async (n) => {
-		h("Loading event…"), _("");
+	}, x = async (n) => {
+		g("Loading event…"), v("");
 		try {
-			p(await be(e, t, n, v, i));
+			m(await be(e, t, n, y, a));
 		} catch (e) {
-			De(e) || _(Ee(e));
+			De(e) || v(Ee(e));
 		} finally {
-			h("");
+			g("");
 		}
 	};
 	return /* @__PURE__ */ (0, O.jsxs)("main", {
@@ -8724,11 +8726,11 @@ function Le({ host: e, home: t, status: n, setStatus: r, signal: i }) {
 							children: "BLEVE FULL-TEXT INDEX"
 						}), /* @__PURE__ */ (0, O.jsx)("h1", { children: "Find the moment, not the folder." })] }), /* @__PURE__ */ (0, O.jsx)("span", {
 							className: "css-mode",
-							children: v === "rpc" ? "Persistent service bridge" : "One-shot command bridge"
+							children: y === "rpc" ? "Persistent service bridge" : "One-shot command bridge"
 						})]
 					}),
 					/* @__PURE__ */ (0, O.jsxs)("form", {
-						onSubmit: (e) => void y(e),
+						onSubmit: (e) => void b(e),
 						children: [/* @__PURE__ */ (0, O.jsxs)("div", {
 							className: "css-searchbox",
 							children: [
@@ -8738,15 +8740,15 @@ function Le({ host: e, home: t, status: n, setStatus: r, signal: i }) {
 								}),
 								/* @__PURE__ */ (0, O.jsx)("input", {
 									"aria-label": "Search conversation index",
-									value: a,
-									onChange: (e) => o(e.target.value),
+									value: o,
+									onChange: (e) => s(e.target.value),
 									placeholder: "Search messages, commands, summaries, titles…"
 								}),
 								/* @__PURE__ */ (0, O.jsx)("button", {
 									className: "css-button primary",
 									type: "submit",
-									disabled: !!m,
-									children: m === "Searching…" ? m : "Search"
+									disabled: !!h,
+									children: h === "Searching…" ? h : "Search"
 								})
 							]
 						}), /* @__PURE__ */ (0, O.jsxs)("div", {
@@ -8754,9 +8756,9 @@ function Le({ host: e, home: t, status: n, setStatus: r, signal: i }) {
 							children: [
 								/* @__PURE__ */ (0, O.jsxs)("label", { children: ["Role", /* @__PURE__ */ (0, O.jsxs)("select", {
 									"aria-label": "Role filter",
-									value: s.role ?? "",
-									onChange: (e) => c({
-										...s,
+									value: c.role ?? "",
+									onChange: (e) => u({
+										...c,
 										role: e.target.value
 									}),
 									children: [
@@ -8784,18 +8786,18 @@ function Le({ host: e, home: t, status: n, setStatus: r, signal: i }) {
 								})] }),
 								/* @__PURE__ */ (0, O.jsxs)("label", { children: ["Kind", /* @__PURE__ */ (0, O.jsx)("input", {
 									"aria-label": "Kind filter",
-									value: s.kind ?? "",
-									onChange: (e) => c({
-										...s,
+									value: c.kind ?? "",
+									onChange: (e) => u({
+										...c,
 										kind: e.target.value
 									}),
 									placeholder: "MessageEvent"
 								})] }),
 								/* @__PURE__ */ (0, O.jsxs)("label", { children: ["Tool", /* @__PURE__ */ (0, O.jsx)("input", {
 									"aria-label": "Tool filter",
-									value: s.tool ?? "",
-									onChange: (e) => c({
-										...s,
+									value: c.tool ?? "",
+									onChange: (e) => u({
+										...c,
 										tool: e.target.value
 									}),
 									placeholder: "terminal"
@@ -8803,28 +8805,28 @@ function Le({ host: e, home: t, status: n, setStatus: r, signal: i }) {
 								/* @__PURE__ */ (0, O.jsxs)("label", { children: ["After", /* @__PURE__ */ (0, O.jsx)("input", {
 									"aria-label": "After date",
 									type: "date",
-									value: s.after ?? "",
-									onChange: (e) => c({
-										...s,
+									value: c.after ?? "",
+									onChange: (e) => u({
+										...c,
 										after: e.target.value
 									})
 								})] }),
 								/* @__PURE__ */ (0, O.jsxs)("label", { children: ["Before", /* @__PURE__ */ (0, O.jsx)("input", {
 									"aria-label": "Before date",
 									type: "date",
-									value: s.before ?? "",
-									onChange: (e) => c({
-										...s,
+									value: c.before ?? "",
+									onChange: (e) => u({
+										...c,
 										before: e.target.value
 									})
 								})] })
 							]
 						})]
 					}),
-					g ? /* @__PURE__ */ (0, O.jsx)("div", {
+					_ ? /* @__PURE__ */ (0, O.jsx)("div", {
 						className: "css-error",
 						role: "alert",
-						children: g
+						children: _
 					}) : null
 				]
 			}),
@@ -8833,13 +8835,13 @@ function Le({ host: e, home: t, status: n, setStatus: r, signal: i }) {
 				children: [
 					/* @__PURE__ */ (0, O.jsxs)("div", {
 						className: "css-results-title",
-						children: [/* @__PURE__ */ (0, O.jsx)("strong", { children: u ? `${u.total.toLocaleString()} matches` : "Ready to search" }), u ? /* @__PURE__ */ (0, O.jsxs)("span", { children: [
-							u.durationMs.toFixed(1),
+						children: [/* @__PURE__ */ (0, O.jsx)("strong", { children: d ? `${d.total.toLocaleString()} matches` : "Ready to search" }), d ? /* @__PURE__ */ (0, O.jsxs)("span", { children: [
+							d.durationMs.toFixed(1),
 							" ms · top ",
-							u.hits.length
+							d.hits.length
 						] }) : /* @__PURE__ */ (0, O.jsx)("span", { children: "Run Index now from operations if this is your first visit." })]
 					}),
-					u?.hits.map((t) => /* @__PURE__ */ (0, O.jsxs)("article", {
+					d?.hits.map((t) => /* @__PURE__ */ (0, O.jsxs)("article", {
 						className: "css-hit",
 						children: [
 							/* @__PURE__ */ (0, O.jsxs)("div", { children: [
@@ -8854,19 +8856,20 @@ function Le({ host: e, home: t, status: n, setStatus: r, signal: i }) {
 							/* @__PURE__ */ (0, O.jsx)("h2", { children: /* @__PURE__ */ (0, O.jsx)(je, {
 								host: e,
 								conversationId: t.conversationId,
+								navigate: i,
 								children: t.title || t.conversationId
 							}) }),
 							/* @__PURE__ */ (0, O.jsx)("p", { children: ke(t.excerpt) || "Metadata-only indexed record" }),
 							/* @__PURE__ */ (0, O.jsx)("button", {
 								type: "button",
 								className: "css-inspect-hit",
-								onClick: () => void b(t.id),
+								onClick: () => void x(t.id),
 								children: "Inspect indexed event"
 							}),
 							/* @__PURE__ */ (0, O.jsx)("code", { children: t.sourcePath })
 						]
 					}, t.id)),
-					u && u.hits.length === 0 ? /* @__PURE__ */ (0, O.jsxs)("div", {
+					d && d.hits.length === 0 ? /* @__PURE__ */ (0, O.jsxs)("div", {
 						className: "css-empty",
 						children: [
 							/* @__PURE__ */ (0, O.jsx)("span", { children: "⌕" }),
@@ -8876,10 +8879,11 @@ function Le({ host: e, home: t, status: n, setStatus: r, signal: i }) {
 					}) : null
 				]
 			}),
-			f ? /* @__PURE__ */ (0, O.jsx)(Ie, {
+			p ? /* @__PURE__ */ (0, O.jsx)(Ie, {
 				host: e,
-				hit: f,
-				close: () => p(null)
+				hit: p,
+				navigate: i,
+				close: () => m(null)
 			}) : null
 		]
 	});
@@ -9147,6 +9151,7 @@ function ze({ host: e, path: t, navigate: n, signal: r }) {
 		home: s,
 		status: f,
 		setStatus: p,
+		navigate: n,
 		signal: r
 	}), [
 		m,
