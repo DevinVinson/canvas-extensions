@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "name": "conversation-search-sidecar",
+  "display_name": "Conversation Search",
+  "version": "0.1.0",
+  "description": "Search local Agent Server conversations through a verified native index.",
+  "entrypoint": "extension.js",
+  "contributes": {
+    "pages": [
+      {
+        "id": "search",
+        "title": "Conversation Search",
+        "path": "/search",
+        "nav_label": "Conversation Search",
+        "description": "Search indexed local conversation messages, events, and tool summaries."
+      },
+      {
+        "id": "operations",
+        "title": "Conversation Search Operations",
+        "path": "/operations",
+        "nav_label": "Index operations",
+        "description": "Inspect data locations and manage the local native index service."
+      }
+    ]
+  }
+}
