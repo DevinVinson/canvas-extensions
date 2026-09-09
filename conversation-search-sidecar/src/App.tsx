@@ -40,6 +40,21 @@ function formatBytes(value: number): string {
 }
 function plainExcerpt(value: string): string { return value.replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim(); }
 
+export function conversationPath(conversationId: string, backendId?: string | null): string {
+  const path = `/conversations/${encodeURIComponent(conversationId)}`;
+  return backendId ? `${path}?backend=${encodeURIComponent(backendId)}` : path;
+}
+
+function ConversationLink({ host, conversationId, children }: { host: CanvasHost; conversationId: string; children: React.ReactNode }) {
+  const path = conversationPath(conversationId, host.backend.id);
+  const open = (event: React.MouseEvent<HTMLAnchorElement>) => {
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    host.navigate(path);
+  };
+  return <a className="css-conversation-link" href={path} onClick={open}>{children}</a>;
+}
+
 function Header({ view, ready, running, navigate }: { view: View; ready: boolean; running: boolean; navigate: (path: string) => void }) {
   return <header className="css-header">
     <button type="button" className="css-brand" onClick={() => navigate(SEARCH_ROUTE)}>
@@ -100,11 +115,11 @@ function StatusStrip({ status }: { status: IndexStatus }) {
   </section>;
 }
 
-function Inspector({ hit, close }: { hit: SearchHit; close: () => void }) {
+function Inspector({ host, hit, close }: { host: CanvasHost; hit: SearchHit; close: () => void }) {
   return <aside className="css-inspector" aria-label="Indexed event inspector">
     <button type="button" className="css-close" onClick={close} aria-label="Close inspector">×</button>
-    <span className="css-eyebrow">INDEXED EVENT</span><h2>{hit.title || "Untitled conversation"}</h2>
-    <dl><div><dt>Conversation</dt><dd>{hit.conversationId}</dd></div><div><dt>Event</dt><dd>{hit.eventId}</dd></div><div><dt>Kind / role</dt><dd>{hit.kind} · {hit.role}</dd></div><div><dt>Tool</dt><dd>{hit.tool || "—"}</dd></div><div><dt>Timestamp</dt><dd>{hit.timestamp || "—"}</dd></div><div><dt>Source</dt><dd><code>{hit.sourcePath}</code></dd></div></dl>
+    <span className="css-eyebrow">INDEXED EVENT</span><h2><ConversationLink host={host} conversationId={hit.conversationId}>{hit.title || "Untitled conversation"}</ConversationLink></h2>
+    <dl><div><dt>Conversation</dt><dd><ConversationLink host={host} conversationId={hit.conversationId}>{hit.conversationId}</ConversationLink></dd></div><div><dt>Event</dt><dd>{hit.eventId}</dd></div><div><dt>Kind / role</dt><dd>{hit.kind} · {hit.role}</dd></div><div><dt>Tool</dt><dd>{hit.tool || "—"}</dd></div><div><dt>Timestamp</dt><dd>{hit.timestamp || "—"}</dd></div><div><dt>Source</dt><dd><code>{hit.sourcePath}</code></dd></div></dl>
     <h3>Indexed text</h3><pre>{hit.text || hit.summary || "This record contains metadata only."}</pre>
     <p className="css-muted">This is the selected, locally indexed representation—not the raw source JSON.</p>
   </aside>;
@@ -148,13 +163,13 @@ function SearchView({ host, home, status, setStatus, signal }: { host: CanvasHos
     </section>
     <section className="css-results">
       <div className="css-results-title"><strong>{results ? `${results.total.toLocaleString()} matches` : "Ready to search"}</strong>{results ? <span>{results.durationMs.toFixed(1)} ms · top {results.hits.length}</span> : <span>Run Index now from operations if this is your first visit.</span>}</div>
-      {results?.hits.map((hit) => <button type="button" className="css-hit" key={hit.id} onClick={() => void inspect(hit.id)}>
+      {results?.hits.map((hit) => <article className="css-hit" key={hit.id}>
         <div><span className="css-role">{hit.role || "unknown"}</span><span>{hit.kind}</span>{hit.tool ? <span>{hit.tool}</span> : null}<time>{hit.timestamp ? new Date(hit.timestamp).toLocaleString() : "No timestamp"}</time></div>
-        <h2>{hit.title || hit.conversationId}</h2><p>{plainExcerpt(hit.excerpt) || "Metadata-only indexed record"}</p><code>{hit.sourcePath}</code>
-      </button>)}
+        <h2><ConversationLink host={host} conversationId={hit.conversationId}>{hit.title || hit.conversationId}</ConversationLink></h2><p>{plainExcerpt(hit.excerpt) || "Metadata-only indexed record"}</p><button type="button" className="css-inspect-hit" onClick={() => void inspect(hit.id)}>Inspect indexed event</button><code>{hit.sourcePath}</code>
+      </article>)}
       {results && results.hits.length === 0 ? <div className="css-empty"><span>⌕</span><h2>No indexed events matched.</h2><p>Try fewer filters, a broader phrase, or refresh the index.</p></div> : null}
     </section>
-    {selected ? <Inspector hit={selected} close={() => setSelected(null)} /> : null}
+    {selected ? <Inspector host={host} hit={selected} close={() => setSelected(null)} /> : null}
   </main>;
 }
 

@@ -17,7 +17,7 @@ try {
     const locations = [{ path: `${home}/.openhands/dev_conversations`, layout: "sdk-dev", state: "ready", conversations: 12, files: 100, malformed: 1 }, { path: `${home}/.openhands/conversations`, layout: "sdk-standard", state: "missing", conversations: 0, files: 0, malformed: 0 }];
     const service = { running: false, mode: "command", version: "0.1.0", idleShutdownSeconds: 600 };
     const status = { ready: true, documents: 98, sourceFiles: 100, conversations: 12, malformedFiles: 1, indexBytes: 65536, lastIndexedAt: "2026-09-09T12:00:00Z", locations, service };
-    const registrations = new Map(); const requests = [];
+    const registrations = new Map(); const requests = []; const navigations = [];
     const url = URL.createObjectURL(new Blob([source], { type: "text/javascript" }));
     const host = { apiVersion: "1", extension: { name: "conversation-search-sidecar", version: "0.1.0" }, backend: { id: "blob-local", kind: "local" }, agentServer: { async request(request) {
       requests.push(request);
@@ -29,7 +29,7 @@ try {
       if (payload.action === "search") return { exit_code: 0, stdout: native({ search: { total: 1, durationMs: 2.4, status, hits: [{ id: "doc-1", score: 1.2, conversationId: "conv", eventId: "evt", title: "Canvas sidecar", timestamp: "2026-09-09T11:00:00Z", role: "user", kind: "MessageEvent", tool: "", sourcePath: `${home}/.openhands/dev_conversations/conv/events/event.json`, excerpt: "native search result" }] } }), stderr: "" };
       if (payload.action === "inspect") return { exit_code: 0, stdout: native({ hit: { id: "doc-1", score: 1.2, conversationId: "conv", eventId: "evt", title: "Canvas sidecar", timestamp: "2026-09-09T11:00:00Z", role: "user", kind: "MessageEvent", tool: "", sourcePath: `${home}/.openhands/dev_conversations/conv/events/event.json`, excerpt: "native search result", text: "native search result" } }), stderr: "" };
       throw new Error(`Unexpected command: ${command.slice(0, 80)}`);
-    } }, registerPage(id, mount) { registrations.set(id, mount); return () => registrations.delete(id); }, navigate() {} };
+    } }, registerPage(id, mount) { registrations.set(id, mount); return () => registrations.delete(id); }, navigate(path) { navigations.push(path); } };
     const container = document.querySelector("#mount");
     const waitFor = async (predicate, label) => { const deadline = performance.now() + 15000; while (!predicate()) { if (performance.now() > deadline) throw new Error(label); await new Promise((resolveWait) => setTimeout(resolveWait, 25)); } };
     try {
@@ -40,6 +40,10 @@ try {
       const input = container.querySelector('input[aria-label="Search conversation index"]'); input.value = "native"; input.dispatchEvent(new Event("input", { bubbles: true }));
       container.querySelector('form button[type="submit"]').click();
       await waitFor(() => container.textContent.includes("native search result"), "Search result did not render.");
+      const conversationLink = container.querySelector('a[href="/conversations/conv?backend=blob-local"]');
+      if (!conversationLink || !conversationLink.textContent.includes("Canvas sidecar")) throw new Error("Search result did not link to its conversation.");
+      conversationLink.click();
+      if (navigations.at(-1) !== "/conversations/conv?backend=blob-local") throw new Error("Conversation link did not use Canvas navigation.");
       const searchCommand = requests.at(-1).body.command;
       if (searchCommand.includes("native search result") || searchCommand.includes("query\":\"native")) throw new Error("Search text escaped into shell source.");
       cleanup(); if (container.childElementCount !== 0) throw new Error("Search cleanup left DOM behind.");
@@ -49,5 +53,5 @@ try {
       return { pages: 1, routes: 2, requests: requests.length };
     } finally { URL.revokeObjectURL(url); }
   }, bundle);
-  console.log(`Blob smoke OK: ${result.pages} registered page with ${result.routes} routes, base64 CLI search, diagnostics, operations, ${result.requests} authenticated requests, and cleanup complete.`);
+  console.log(`Blob smoke OK: ${result.pages} registered page with ${result.routes} routes, clickable conversation navigation, base64 CLI search, diagnostics, operations, ${result.requests} authenticated requests, and cleanup complete.`);
 } finally { await browser.close(); }
