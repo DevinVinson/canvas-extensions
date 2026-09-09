@@ -12,14 +12,7 @@
         "title": "Conversation Search",
         "path": "/search",
         "nav_label": "Conversation Search",
-        "description": "Search indexed local conversation messages, events, and tool summaries."
-      },
-      {
-        "id": "operations",
-        "title": "Conversation Search Operations",
-        "path": "/operations",
-        "nav_label": "Index operations",
-        "description": "Inspect data locations and manage the local native index service."
+        "description": "Search indexed local conversations and manage the native index through nested App routes."
       }
     ]
   }

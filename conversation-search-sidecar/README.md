@@ -117,14 +117,14 @@ npm run check
 
 `npm run check` verifies the native metadata hashes, TypeScript, a Vite library build, exactly one self-contained `dist/extension.js`, Vitest suites, Go suites, and a real Chromium Blob-import smoke test. The successful build copies the artifact to checked-in `extension.js`.
 
-The Go tests cover missing/empty/dual layouts, observed SDK parsing, safe field selection, valid and malformed records, deterministic persistent indexing, ranking/filtering, incremental no-op/update/deletion behavior, corrupt-index rebuild, daemon health/RPC/search/stop, and idle cleanup. Browser tests cover both declared pages, nested/unknown routing, disposal, unsafe home rejection, non-mutating diagnostics, supported/missing prerequisite states, approval-gated build, source/binary verification commands, base64 query isolation, search/inspection, index/rebuild controls, service start/stop state, repair, and two-step deletion.
+The Go tests cover missing/empty/dual layouts, observed SDK parsing, safe field selection, valid and malformed records, deterministic persistent indexing, ranking/filtering, incremental no-op/update/deletion behavior, corrupt-index rebuild, daemon health/RPC/search/stop, and idle cleanup. Browser tests cover the single declared page, its search/index-operations nested routes, unknown routing, disposal, unsafe home rejection, non-mutating diagnostics, supported/missing prerequisite states, approval-gated build, source/binary verification commands, base64 query isolation, search/inspection, index/rebuild controls, service start/stop state, repair, and two-step deletion.
 
 ## Local Agent Canvas acceptance checklist
 
 The Apps UI has no refresh button. Rebuild, uninstall, and reinstall the App before testing a changed bundle.
 
 1. Run `npm install && npm run check` in this directory.
-2. Install the App from the absolute local `conversation-search-sidecar/` path and enable both pages.
+2. Install the App from the absolute local `conversation-search-sidecar/` path and enable its single **Conversation Search** page. **Index operations** is a nested route inside that page, not a second manifest registration.
 3. Open **Conversation Search**. Confirm the initial probe says it was read-only; verify target, Go version, exact App data path, and diagnostics for `dev_conversations`, `conversations`, and any discovered persistence root.
 4. Confirm install is disabled until the sensitive-data/network/disk acknowledgment is selected. If Go is absent, copy the agent prompt and verify it requests approval before system changes. With Go available, build/install and confirm the binary/source/artifact files stay below the displayed App directory.
 5. In **Index operations**, click **Index now** in command mode. For real data, verify document/source/conversation counts, progress summary, malformed count, timestamp, and nonzero index size. Check that source conversation mtimes/content did not change.

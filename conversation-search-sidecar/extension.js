@@ -8383,10 +8383,10 @@ var xe = /* @__PURE__ */ e(((e) => {
 	e.jsx = n, e.jsxs = n;
 })), k = (/* @__PURE__ */ e(((e, t) => {
 	t.exports = xe();
-})))(), Se = "/extensions/conversation-search-sidecar/search", Ce = "/extensions/conversation-search-sidecar/operations";
-function we(e, t) {
-	let n = t.replace(/^\/+|\/+$/g, "").split("/").filter(Boolean)[0] ?? "";
-	return e === "search" && (n === "" || n === "search") ? "search" : e === "operations" && (n === "" || n === "operations") ? "operations" : "not-found";
+})))(), Se = "/extensions/conversation-search-sidecar/search", Ce = `${Se}/operations`;
+function we(e) {
+	let t = e.replace(/^\/+|\/+$/g, "").split("/").filter(Boolean)[0] ?? "";
+	return t === "" || t === "search" ? "search" : t === "operations" ? "operations" : "not-found";
 }
 function Te(e) {
 	return e instanceof Error ? e.message : String(e);
@@ -8426,7 +8426,7 @@ function ke({ view: e, ready: t, running: n, navigate: r }) {
 				}), /* @__PURE__ */ (0, k.jsxs)("span", { children: [/* @__PURE__ */ (0, k.jsx)("small", { children: "LOCAL NATIVE INDEX" }), /* @__PURE__ */ (0, k.jsx)("strong", { children: "Conversation Search" })] })]
 			}),
 			/* @__PURE__ */ (0, k.jsxs)("nav", {
-				"aria-label": "Conversation Search pages",
+				"aria-label": "Conversation Search views",
 				children: [/* @__PURE__ */ (0, k.jsx)("button", {
 					type: "button",
 					"aria-current": e === "search" ? "page" : void 0,
@@ -9022,35 +9022,35 @@ function Fe({ host: e, home: t, status: n, setStatus: r, recheck: i, signal: a }
 		]
 	});
 }
-function Ie({ host: e, pageId: t, path: n, navigate: r, signal: i }) {
-	let a = we(t, n), [o, s] = (0, l.useState)(0), [c, u] = (0, l.useState)(""), [d, f] = (0, l.useState)(null), [p, m] = (0, l.useState)(null), [h, g] = (0, l.useState)(""), [_, v] = (0, l.useState)("");
+function Ie({ host: e, path: t, navigate: n, signal: r }) {
+	let i = we(t), [a, o] = (0, l.useState)(0), [s, c] = (0, l.useState)(""), [u, d] = (0, l.useState)(null), [f, p] = (0, l.useState)(null), [m, h] = (0, l.useState)(""), [g, _] = (0, l.useState)("");
 	(0, l.useEffect)(() => {
-		u(""), f(null), m(null), v(""), ce(e, i).then(async (t) => {
-			u(t);
-			let n = await T(e, t, i);
-			f(n), n.installed && m(await ge(e, t, "once", i));
+		c(""), d(null), p(null), _(""), ce(e, r).then(async (t) => {
+			c(t);
+			let n = await T(e, t, r);
+			d(n), n.installed && p(await ge(e, t, "once", r));
 		}).catch((e) => {
-			Ee(e) || v(Te(e));
+			Ee(e) || _(Te(e));
 		});
 	}, [
-		o,
+		a,
 		e,
-		i
+		r
 	]);
-	let y = (0, l.useCallback)(() => s((e) => e + 1), []), b = (0, l.useCallback)(async () => {
-		g("Building native sidecar…"), v("");
+	let v = (0, l.useCallback)(() => o((e) => e + 1), []), y = (0, l.useCallback)(async () => {
+		h("Building native sidecar…"), _("");
 		try {
-			await fe(e, c, i), s((e) => e + 1);
+			await fe(e, s, r), o((e) => e + 1);
 		} catch (e) {
-			Ee(e) || v(Te(e));
+			Ee(e) || _(Te(e));
 		} finally {
-			g("");
+			h("");
 		}
 	}, [
-		c,
+		s,
 		e,
-		i
-	]), x = (0, l.useMemo)(() => a === "not-found" ? /* @__PURE__ */ (0, k.jsxs)("main", {
+		r
+	]), b = (0, l.useMemo)(() => i === "not-found" ? /* @__PURE__ */ (0, k.jsxs)("main", {
 		className: "css-state",
 		children: [
 			/* @__PURE__ */ (0, k.jsx)("span", {
@@ -9060,11 +9060,11 @@ function Ie({ host: e, pageId: t, path: n, navigate: r, signal: i }) {
 			/* @__PURE__ */ (0, k.jsx)("h1", { children: "This page is not part of Conversation Search." }),
 			/* @__PURE__ */ (0, k.jsx)("button", {
 				className: "css-button primary",
-				onClick: () => r(Se),
+				onClick: () => n(Se),
 				children: "Open search"
 			})
 		]
-	}) : _ && !d ? /* @__PURE__ */ (0, k.jsxs)("main", {
+	}) : g && !u ? /* @__PURE__ */ (0, k.jsxs)("main", {
 		className: "css-state",
 		children: [
 			/* @__PURE__ */ (0, k.jsx)("span", {
@@ -9072,14 +9072,14 @@ function Ie({ host: e, pageId: t, path: n, navigate: r, signal: i }) {
 				children: "BACKEND ERROR"
 			}),
 			/* @__PURE__ */ (0, k.jsx)("h1", { children: "Could not inspect this Agent Server." }),
-			/* @__PURE__ */ (0, k.jsx)("p", { children: _ }),
+			/* @__PURE__ */ (0, k.jsx)("p", { children: g }),
 			/* @__PURE__ */ (0, k.jsx)("button", {
 				className: "css-button primary",
-				onClick: y,
+				onClick: v,
 				children: "Try again"
 			})
 		]
-	}) : !c || !d ? /* @__PURE__ */ (0, k.jsxs)("main", {
+	}) : !s || !u ? /* @__PURE__ */ (0, k.jsxs)("main", {
 		className: "css-state",
 		children: [
 			/* @__PURE__ */ (0, k.jsxs)("div", {
@@ -9096,49 +9096,49 @@ function Ie({ host: e, pageId: t, path: n, navigate: r, signal: i }) {
 			}),
 			/* @__PURE__ */ (0, k.jsx)("h1", { children: "Mapping local conversation stores…" })
 		]
-	}) : !d.installed || !p ? /* @__PURE__ */ (0, k.jsx)(je, {
-		home: c,
-		probe: d,
-		busy: h,
-		error: _,
-		onInstall: () => void b(),
-		onRecheck: y
-	}) : a === "operations" ? /* @__PURE__ */ (0, k.jsx)(Fe, {
+	}) : !u.installed || !f ? /* @__PURE__ */ (0, k.jsx)(je, {
+		home: s,
+		probe: u,
+		busy: m,
+		error: g,
+		onInstall: () => void y(),
+		onRecheck: v
+	}) : i === "operations" ? /* @__PURE__ */ (0, k.jsx)(Fe, {
 		host: e,
-		home: c,
-		status: p,
-		setStatus: m,
-		recheck: y,
-		signal: i
+		home: s,
+		status: f,
+		setStatus: p,
+		recheck: v,
+		signal: r
 	}) : /* @__PURE__ */ (0, k.jsx)(Pe, {
 		host: e,
-		home: c,
-		status: p,
-		setStatus: m,
-		signal: i
+		home: s,
+		status: f,
+		setStatus: p,
+		signal: r
 	}), [
-		h,
-		_,
-		c,
+		m,
+		g,
+		s,
 		e,
-		b,
-		r,
-		d,
 		y,
-		i,
-		p,
-		a
+		n,
+		u,
+		v,
+		r,
+		f,
+		i
 	]);
 	return /* @__PURE__ */ (0, k.jsxs)("section", {
 		className: "conversation-search-sidecar",
 		children: [
 			/* @__PURE__ */ (0, k.jsx)(ke, {
-				view: a,
-				ready: !!(d?.installed && p),
-				running: !!p?.service.running,
-				navigate: r
+				view: i,
+				ready: !!(u?.installed && f),
+				running: !!f?.service.running,
+				navigate: n
 			}),
-			x,
+			b,
 			/* @__PURE__ */ (0, k.jsxs)("footer", { children: [/* @__PURE__ */ (0, k.jsxs)("span", { children: [
 				"Local-only index · ",
 				e.backend.kind ?? "unknown",
@@ -9155,26 +9155,21 @@ var Le = ":root{--lightningcss-light: ;--lightningcss-dark:initial;color-scheme:
 //#region src/extension.tsx
 function Re(e) {
 	if (e.apiVersion !== "1") throw Error(`Conversation Search requires Canvas host API 1, received ${e.apiVersion}.`);
-	let t = [];
-	for (let n of ["search", "operations"]) t.push(e.registerPage(n, (t) => {
-		let r = new AbortController(), i = document.createElement("style");
-		i.dataset.conversationSearchSidecar = "styles", i.textContent = Le;
-		let a = document.createElement("div");
-		a.dataset.conversationSearchSidecar = "root", t.container.append(i, a);
-		let o = (0, u.createRoot)(a);
-		return o.render(/* @__PURE__ */ (0, k.jsx)(Ie, {
+	return e.registerPage("search", ({ container: t, path: n, navigate: r }) => {
+		let i = new AbortController(), a = document.createElement("style");
+		a.dataset.conversationSearchSidecar = "styles", a.textContent = Le;
+		let o = document.createElement("div");
+		o.dataset.conversationSearchSidecar = "root", t.append(a, o);
+		let s = (0, u.createRoot)(o);
+		return s.render(/* @__PURE__ */ (0, k.jsx)(Ie, {
 			host: e,
-			pageId: n,
-			path: t.path,
-			navigate: t.navigate,
-			signal: r.signal
+			path: n,
+			navigate: r,
+			signal: i.signal
 		})), () => {
-			r.abort(), o.unmount(), a.remove(), i.remove();
+			i.abort(), s.unmount(), o.remove(), a.remove();
 		};
-	}));
-	return () => {
-		for (let e of t.reverse()) e();
-	};
+	});
 }
 //#endregion
 export { Re as activate };

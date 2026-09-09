@@ -20,13 +20,13 @@ import {
 import type { CanvasHost, DataLocation, IndexStatus, ProbeStatus, SearchFilters, SearchHit, SearchResponse } from "./types";
 
 export const SEARCH_ROUTE = "/extensions/conversation-search-sidecar/search";
-export const OPERATIONS_ROUTE = "/extensions/conversation-search-sidecar/operations";
+export const OPERATIONS_ROUTE = `${SEARCH_ROUTE}/operations`;
 type View = "search" | "operations" | "not-found";
 
-export function normalizeRoute(pageId: string, path: string): View {
+export function normalizeRoute(path: string): View {
   const segment = path.replace(/^\/+|\/+$/g, "").split("/").filter(Boolean)[0] ?? "";
-  if (pageId === "search" && (segment === "" || segment === "search")) return "search";
-  if (pageId === "operations" && (segment === "" || segment === "operations")) return "operations";
+  if (segment === "" || segment === "search") return "search";
+  if (segment === "operations") return "operations";
   return "not-found";
 }
 
@@ -46,7 +46,7 @@ function Header({ view, ready, running, navigate }: { view: View; ready: boolean
       <span className="css-logo" aria-hidden="true"><i /><i /><i /></span>
       <span><small>LOCAL NATIVE INDEX</small><strong>Conversation Search</strong></span>
     </button>
-    <nav aria-label="Conversation Search pages">
+    <nav aria-label="Conversation Search views">
       <button type="button" aria-current={view === "search" ? "page" : undefined} onClick={() => navigate(SEARCH_ROUTE)}>Search</button>
       <button type="button" aria-current={view === "operations" ? "page" : undefined} onClick={() => navigate(OPERATIONS_ROUTE)}>Index operations</button>
     </nav>
@@ -181,8 +181,8 @@ function Operations({ host, home, status, setStatus, recheck, signal }: { host: 
   </main>;
 }
 
-export function App({ host, pageId, path, navigate, signal }: { host: CanvasHost; pageId: string; path: string; navigate: (path: string) => void; signal: AbortSignal }) {
-  const view = normalizeRoute(pageId, path);
+export function App({ host, path, navigate, signal }: { host: CanvasHost; path: string; navigate: (path: string) => void; signal: AbortSignal }) {
+  const view = normalizeRoute(path);
   const [attempt, setAttempt] = useState(0); const [home, setHome] = useState(""); const [probe, setProbe] = useState<ProbeStatus | null>(null); const [status, setStatus] = useState<IndexStatus | null>(null); const [busy, setBusy] = useState(""); const [error, setError] = useState("");
   useEffect(() => {
     setHome(""); setProbe(null); setStatus(null); setError("");

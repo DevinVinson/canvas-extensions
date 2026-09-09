@@ -34,7 +34,7 @@ try {
     const waitFor = async (predicate, label) => { const deadline = performance.now() + 15000; while (!predicate()) { if (performance.now() > deadline) throw new Error(label); await new Promise((resolveWait) => setTimeout(resolveWait, 25)); } };
     try {
       const module = await import(url); const deactivate = module.activate(host);
-      if (registrations.size !== 2 || !registrations.has("search") || !registrations.has("operations")) throw new Error("Declared pages were not registered.");
+      if (registrations.size !== 1 || !registrations.has("search")) throw new Error("The single declared page was not registered.");
       const cleanup = registrations.get("search")({ container, path: "", navigate() {} });
       await waitFor(() => container.textContent.includes("Find the moment") && container.textContent.includes("98"), "Search page did not render.");
       const input = container.querySelector('input[aria-label="Search conversation index"]'); input.value = "native"; input.dispatchEvent(new Event("input", { bubbles: true }));
@@ -43,11 +43,11 @@ try {
       const searchCommand = requests.at(-1).body.command;
       if (searchCommand.includes("native search result") || searchCommand.includes("query\":\"native")) throw new Error("Search text escaped into shell source.");
       cleanup(); if (container.childElementCount !== 0) throw new Error("Search cleanup left DOM behind.");
-      const operationsCleanup = registrations.get("operations")({ container, path: "", navigate() {} });
+      const operationsCleanup = registrations.get("search")({ container, path: "operations", navigate() {} });
       await waitFor(() => container.textContent.includes("Own the index lifecycle") && container.textContent.includes("sdk-dev"), "Operations page did not render.");
       operationsCleanup(); deactivate(); if (registrations.size !== 0 || container.childElementCount !== 0) throw new Error("Final cleanup failed.");
-      return { pages: 2, requests: requests.length };
+      return { pages: 1, routes: 2, requests: requests.length };
     } finally { URL.revokeObjectURL(url); }
   }, bundle);
-  console.log(`Blob smoke OK: ${result.pages} pages, base64 CLI search, diagnostics, operations, ${result.requests} authenticated requests, and cleanup complete.`);
+  console.log(`Blob smoke OK: ${result.pages} registered page with ${result.routes} routes, base64 CLI search, diagnostics, operations, ${result.requests} authenticated requests, and cleanup complete.`);
 } finally { await browser.close(); }
