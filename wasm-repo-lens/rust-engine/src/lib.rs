@@ -133,7 +133,7 @@ fn parse_snapshot(input: &str) -> Result<Snapshot, String> {
             }
             "T" => snapshot.truncated = true,
             "" => {}
-            _ => return Err("The Agent Server returned an unknown snapshot record.".into()),
+            _ => return Err("The Agent Server returned an incomplete snapshot record. The command response may have been truncated.".into()),
         }
     }
     if !saw_version {
@@ -446,12 +446,13 @@ mod tests {
 
     #[test]
     fn analyzes_protocol_records() {
-        let snapshot = parse_snapshot("V\t1\nB\tbWFpbg==\nF\tc3JjL2xpYi5ycw==\t120\nC\tc3JjL2xpYi5ycw==\tdXNlIHNlcmRlOwo=\nH\tc3JjL2xpYi5ycw==\n").unwrap();
+        let snapshot = parse_snapshot("V\t1\nB\tbWFpbg==\nF\tc3JjL2xpYi5ycw==\t120\nC\tc3JjL2xpYi5ycw==\tdXNlIHNlcmRlOwo=\nH\tc3JjL2xpYi5ycw==\nT\tcontent-bytes\n").unwrap();
         let output = build_analysis(snapshot).unwrap();
         assert!(output.contains("\"branch\":\"main\""));
         assert!(output.contains("\"name\":\"Rust\""));
         assert!(output.contains("\"path\":\"src/lib.rs\""));
         assert!(output.contains("\"name\":\"serde\""));
+        assert!(output.contains("\"truncated\":true"));
     }
 
     #[test]

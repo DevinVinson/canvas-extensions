@@ -22,10 +22,11 @@ The snapshot command:
 
 - uses `rg --files --hidden` and excludes `.git`, dependency, environment, build, and generated-output directories;
 - inventories at most 5,000 files;
-- reads at most the first 12,288 bytes from each of at most 250 supported source or manifest files;
+- reads at most the first 4,096 bytes from each of at most 250 supported source or manifest files;
 - reads only file paths from the latest 200 Git commits for churn counts;
 - base64-encodes paths and sampled bytes before emitting the line protocol, so shell metacharacters never become executable text; and
-- runs with a 45-second Agent Server timeout.
+- preserves complete protocol records while independently limiting inventory to 300 KB, history to 150 KB, and source samples to 350 KB; and
+- runs with a 45-second Agent Server timeout. The combined response remains below the Agent Server synchronous endpoint's 1 MiB event boundary.
 
 The Rust engine validates and decodes that protocol, rejects parent traversal paths, classifies common language extensions, and bounds every rendered ranking. A repository exceeding the file cap is marked as truncated in the UI and export.
 
@@ -74,7 +75,7 @@ The build compiles `rust-engine/src/lib.rs` as an optimized `cdylib` and copies 
 The checked-in WASM for version 0.1.0 has SHA-256:
 
 ```text
-a06c67a7e1239a34a587cb0db4be91cba39288c2f2771155a1916472ddedb3d6  src/repo_lens_engine.wasm
+370bed950deee7e2d04d6cfe764436360545413cc0dfbc8e57867d9bd7a307c2  src/repo_lens_engine.wasm
 ```
 
 After changing Rust, commit the rebuilt `src/repo_lens_engine.wasm` and the regenerated root `extension.js`. `npm run build` synchronizes the sole Vite output to the checked-in root artifact.

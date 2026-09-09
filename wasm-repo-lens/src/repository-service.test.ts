@@ -82,6 +82,10 @@ describe("controlled Agent Server commands", () => {
     const request = vi.fn(async () => ({ exit_code: 0, stdout: "V\t1\n", stderr: "" }));
     await expect(gatherRepositorySnapshot(hostWithRequest(request), workspace)).resolves.toBe("V\t1\n");
     expect(SNAPSHOT_COMMAND).not.toContain(workspace.path);
+    expect(SNAPSHOT_COMMAND).toContain("total+size > 300000");
+    expect(SNAPSHOT_COMMAND).toContain("total+size > 150000");
+    expect(SNAPSHOT_COMMAND).toContain("total+size > 350000");
+    expect(SNAPSHOT_COMMAND).toContain("head -c 4096");
     expect(request).toHaveBeenCalledWith({
       path: "/api/bash/execute_bash_command",
       method: "POST",

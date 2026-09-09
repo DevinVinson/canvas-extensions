@@ -391,7 +391,7 @@ export function App({ host, path, navigate, signal, client }: AppProps) {
                 ) : null}
                 {ready ? (
                   <div className="lens-run">
-                    <div><span className="lens-step">03</span><div><h2>Analyze in the browser</h2><p>Inventory ≤5,000 files · source samples ≤250 × 12 KB · history ≤200 commits</p></div></div>
+                    <div><span className="lens-step">03</span><div><h2>Analyze in the browser</h2><p>Inventory ≤5,000 files · source samples ≤250 × 4 KB · history ≤200 commits · response ≤800 KB</p></div></div>
                     <button className="lens-button lens-button--primary" data-testid="analyze" type="button" disabled={busy} onClick={runAnalysis}>{busy ? "Analysis running…" : analysis ? "Analyze again" : "Analyze repository"}</button>
                   </div>
                 ) : null}

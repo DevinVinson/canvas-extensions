@@ -13,7 +13,6 @@ export const SNAPSHOT_COMMAND = String.raw`printf 'V\t1\n'
 branch=$(git branch --show-current 2>/dev/null || true)
 printf 'B\t%s\n' "$(printf '%s' "$branch" | base64 | tr -d '\n')"
 file_count=0
-content_count=0
 rg --files --hidden -0 -g '!.git/**' -g '!node_modules/**' -g '!target/**' -g '!dist/**' -g '!build/**' -g '!.next/**' -g '!.venv/**' -g '!venv/**' | while IFS= read -r -d '' file; do
   file_count=$((file_count + 1))
   [ "$file_count" -gt 5000 ] && printf 'T\tfiles\n' && break
@@ -21,20 +20,23 @@ rg --files --hidden -0 -g '!.git/**' -g '!node_modules/**' -g '!target/**' -g '!
   size=$(wc -c < "$file" 2>/dev/null | tr -d '[:space:]')
   [ -z "$size" ] && size=0
   printf 'F\t%s\t%s\n' "$path64" "$size"
-  if [ "$content_count" -lt 250 ]; then
-    case "$file" in
-      package.json|*/package.json|Cargo.toml|*/Cargo.toml|go.mod|*/go.mod|pyproject.toml|*/pyproject.toml|requirements.txt|*/requirements.txt|*.js|*.jsx|*.mjs|*.cjs|*.ts|*.tsx|*.py|*.rs|*.go|*.java|*.kt|*.kts|*.c|*.h|*.cc|*.cpp|*.cs|*.rb|*.php|*.swift|*.vue|*.svelte)
-        content64=$(head -c 12288 "$file" 2>/dev/null | base64 | tr -d '\n')
-        printf 'C\t%s\t%s\n' "$path64" "$content64"
-        content_count=$((content_count + 1))
-        ;;
-    esac
-  fi
-done
+done | awk 'BEGIN { total=0 } { size=length($0)+1; if (total+size > 300000) { print "T\tinventory-bytes"; exit } print; total+=size }'
 git log -z --format= --name-only -n 200 -- . 2>/dev/null | while IFS= read -r -d '' file; do
   [ -z "$file" ] && continue
   printf 'H\t%s\n' "$(printf '%s' "$file" | base64 | tr -d '\n')"
-done`;
+done | awk 'BEGIN { total=0 } { size=length($0)+1; if (total+size > 150000) { print "T\thistory-bytes"; exit } print; total+=size }'
+content_count=0
+rg --files --hidden -0 -g '!.git/**' -g '!node_modules/**' -g '!target/**' -g '!dist/**' -g '!build/**' -g '!.next/**' -g '!.venv/**' -g '!venv/**' | while IFS= read -r -d '' file; do
+  [ "$content_count" -ge 250 ] && break
+  case "$file" in
+    package.json|*/package.json|Cargo.toml|*/Cargo.toml|go.mod|*/go.mod|pyproject.toml|*/pyproject.toml|requirements.txt|*/requirements.txt|*.js|*.jsx|*.mjs|*.cjs|*.ts|*.tsx|*.py|*.rs|*.go|*.java|*.kt|*.kts|*.c|*.h|*.cc|*.cpp|*.cs|*.rb|*.php|*.swift|*.vue|*.svelte)
+      path64=$(printf '%s' "$file" | base64 | tr -d '\n')
+      content64=$(head -c 4096 "$file" 2>/dev/null | base64 | tr -d '\n')
+      printf 'C\t%s\t%s\n' "$path64" "$content64"
+      content_count=$((content_count + 1))
+      ;;
+  esac
+done | awk 'BEGIN { total=0 } { size=length($0)+1; if (total+size > 350000) { print "T\tcontent-bytes"; exit } print; total+=size }'`;
 
 interface WorkspaceResponse {
   workspaceParents?: Array<{ path?: unknown }>;
