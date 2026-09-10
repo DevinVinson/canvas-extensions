@@ -2,9 +2,9 @@
 name: prototype
 description: Create and register a focused, portable self-contained HTML product prototype. Use when the user asks for a prototype, UI mockup, or interactive product concept.
 triggers:
-- /prototype
-- product prototype
-- html prototype
+  - /prototype
+  - product prototype
+  - html prototype
 ---
 
 # /prototype

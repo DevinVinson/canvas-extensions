@@ -1,3 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
 import { activate, __testing } from "./extension";
-describe("activation", () => { it("registers exactly the Artifacts page and cleans up", () => { const unregister = vi.fn(); const host = { apiVersion: "1", registerPage: vi.fn(() => unregister) }; const stop = activate(host); expect(__testing.page).toBe("artifacts"); expect(host.registerPage).toHaveBeenCalledTimes(1); stop(); expect(unregister).toHaveBeenCalledOnce(); }); it("rejects unsupported hosts", () => expect(() => activate({ apiVersion: "2", registerPage: vi.fn() })).toThrow("API 1")); });
+describe("activation", () => {
+  it("registers exactly the Artifacts page and cleans up", () => {
+    const unregister = vi.fn();
+    const host = { apiVersion: "1", registerPage: vi.fn(() => unregister) };
+    const stop = activate(host);
+    expect(__testing.page).toBe("artifacts");
+    expect(host.registerPage).toHaveBeenCalledTimes(1);
+    stop();
+    expect(unregister).toHaveBeenCalledOnce();
+  });
+  it("rejects unsupported hosts", () =>
+    expect(() => activate({ apiVersion: "2", registerPage: vi.fn() })).toThrow(
+      "API 1",
+    ));
+});

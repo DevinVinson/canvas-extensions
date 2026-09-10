@@ -1,12 +1,125 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { chromium } from "playwright-core";
-const chrome = process.env.CHROME_PATH ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
-const source = await readFile(resolve(import.meta.dirname, "../extension.js"), "utf8"); const browser = await chromium.launch({ executablePath: chrome, headless: true });
-try { const page = await browser.newPage(); await page.setContent("<main id=mount></main>"); const result = await page.evaluate(async source => {
-  const registrations = new Map(); const requests = []; const home = "/srv/canvas";
-  const encode = value => btoa(JSON.stringify(value)); const helper = data => `ARTIFACT_HANDOFF\t${encode({ ok: true, data })}\n`;
-  const artifact = { schema_version:1,id:"ah-blob123",title:"Blob handoff",summary:"Durable test",type:"handoff",tags:["test"],created_at:"2026-01-01T00:00:00Z",producer:"test",originating_skill:"handoff",storage_mode:"snapshot",source:"/tmp/a.md",content:{path:"content/a.md",media_type:"text/markdown",bytes:5,sha256:"0".repeat(64)} };
-  const host = { apiVersion:"1", backend:{kind:"local"}, agentServer:{ async request(request) { requests.push(request); if (request.path === "/api/file/home") return {home}; if (request.path === "/api/plugins/installed") return {plugins:[{name:"artifact-handoff",enabled:true,source:"local",resolved_ref:"test",repo_path:"artifact-handoff/plugin"}]}; const command = request.body?.command || ""; const payload = JSON.parse(atob(command.match(/python3 - '([A-Za-z0-9+/=]+)'/)?.[1] || "e30=")); if (payload.action) return {stdout:helper(payload.action === "list" ? {artifacts:[artifact],invalid:[],truncated:false} : payload.action === "get" ? {manifest:artifact,preview:"# Blob",preview_truncated:false} : {python:"3.13",store_exists:false,root:`${home}/.openhands/apps/artifact-handoff`,mutated:false})}; throw new Error("unexpected request"); }}, registerPage(id,mount) { registrations.set(id,mount); return () => registrations.delete(id); } };
-  const url = URL.createObjectURL(new Blob([source],{type:"text/javascript"})); try { const mod = await import(url); const stop = mod.activate(host); if (registrations.size !== 1 || !registrations.has("artifacts")) throw new Error("page registration failed"); const container = document.querySelector("#mount"); const cleanup = registrations.get("artifacts")({container,path:"",navigate(){}}); await new Promise(resolve => setTimeout(resolve, 100)); if (!container.textContent.includes("Blob handoff")) throw new Error("library did not render"); cleanup(); stop(); if (container.childElementCount || registrations.size) throw new Error("cleanup failed"); return requests.length; } finally { URL.revokeObjectURL(url); }
-}, source); console.log(`Blob smoke OK: one page, ${result} authenticated requests, self-contained import, cleanup complete.`); } finally { await browser.close(); }
+const chrome =
+  process.env.CHROME_PATH ??
+  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+const source = await readFile(
+  resolve(import.meta.dirname, "../extension.js"),
+  "utf8",
+);
+const browser = await chromium.launch({
+  executablePath: chrome,
+  headless: true,
+});
+try {
+  const page = await browser.newPage();
+  await page.setContent("<main id=mount></main>");
+  const result = await page.evaluate(async (source) => {
+    const registrations = new Map();
+    const requests = [];
+    const home = "/srv/canvas";
+    const encode = (value) => btoa(JSON.stringify(value));
+    const helper = (data) =>
+      `ARTIFACT_HANDOFF\t${encode({ ok: true, data })}\n`;
+    const artifact = {
+      schema_version: 1,
+      id: "ah-blob123",
+      title: "Blob handoff",
+      summary: "Durable test",
+      type: "handoff",
+      tags: ["test"],
+      created_at: "2026-01-01T00:00:00Z",
+      producer: "test",
+      originating_skill: "handoff",
+      storage_mode: "snapshot",
+      source: "/tmp/a.md",
+      content: {
+        path: "content/a.md",
+        media_type: "text/markdown",
+        bytes: 5,
+        sha256: "0".repeat(64),
+      },
+    };
+    const host = {
+      apiVersion: "1",
+      backend: { kind: "local" },
+      agentServer: {
+        async request(request) {
+          requests.push(request);
+          if (request.path === "/api/file/home") return { home };
+          if (request.path === "/api/plugins/installed")
+            return {
+              plugins: [
+                {
+                  name: "artifact-handoff",
+                  enabled: true,
+                  source: "local",
+                  resolved_ref: "test",
+                  repo_path: "artifact-handoff/plugin",
+                },
+              ],
+            };
+          const command = request.body?.command || "";
+          const payload = JSON.parse(
+            atob(command.match(/python3 - '([A-Za-z0-9+/=]+)'/)?.[1] || "e30="),
+          );
+          if (payload.action)
+            return {
+              stdout: helper(
+                payload.action === "list"
+                  ? { artifacts: [artifact], invalid: [], truncated: false }
+                  : payload.action === "get"
+                    ? {
+                        manifest: artifact,
+                        preview: "# Blob",
+                        preview_truncated: false,
+                      }
+                    : {
+                        python: "3.13",
+                        store_exists: false,
+                        root: `${home}/.openhands/apps/artifact-handoff`,
+                        mutated: false,
+                      },
+              ),
+            };
+          throw new Error("unexpected request");
+        },
+      },
+      registerPage(id, mount) {
+        registrations.set(id, mount);
+        return () => registrations.delete(id);
+      },
+    };
+    const url = URL.createObjectURL(
+      new Blob([source], { type: "text/javascript" }),
+    );
+    try {
+      const mod = await import(url);
+      const stop = mod.activate(host);
+      if (registrations.size !== 1 || !registrations.has("artifacts"))
+        throw new Error("page registration failed");
+      const container = document.querySelector("#mount");
+      const cleanup = registrations.get("artifacts")({
+        container,
+        path: "",
+        navigate() {},
+      });
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      if (!container.textContent.includes("Blob handoff"))
+        throw new Error("library did not render");
+      cleanup();
+      stop();
+      if (container.childElementCount || registrations.size)
+        throw new Error("cleanup failed");
+      return requests.length;
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }, source);
+  console.log(
+    `Blob smoke OK: one page, ${result} authenticated requests, self-contained import, cleanup complete.`,
+  );
+} finally {
+  await browser.close();
+}

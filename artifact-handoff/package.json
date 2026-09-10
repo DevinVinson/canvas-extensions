@@ -6,11 +6,24 @@
   "scripts": {
     "build": "vite build && node scripts/check-artifact.mjs --sync",
     "check:artifact": "node scripts/check-artifact.mjs",
+    "format:check": "prettier --check 'src/**/*.{ts,css}' 'scripts/*.mjs' '*.json' '*.ts' 'README.md' 'plugin/**/*.md' 'plugin/.plugin/plugin.json'",
     "typecheck": "tsc --noEmit",
     "test": "vitest run && python3 -m unittest discover -s tests -p 'test_*.py'",
     "test:blob": "node scripts/blob-smoke.mjs",
-    "check": "npm run typecheck && npm run build && npm run check:artifact && npm run test && npm run test:blob"
+    "check": "npm run format:check && npm run typecheck && npm run build && npm run check:artifact && npm run test && npm run test:blob"
   },
-  "dependencies": { "react": "^19.2.8", "react-dom": "^19.2.3" },
-  "devDependencies": { "@types/node": "^25.5.0", "@vitejs/plugin-react": "^6.1.1", "jsdom": "^28.1.0", "playwright-core": "^1.58.2", "typescript": "^5.9.3", "vite": "^8.2.2", "vitest": "^5.0.0" }
+  "dependencies": {
+    "react": "^19.2.8",
+    "react-dom": "^19.2.3"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "jsdom": "^28.1.0",
+    "playwright-core": "^1.58.2",
+    "prettier": "^3.9.6",
+    "typescript": "^5.9.3",
+    "vite": "^8.2.2",
+    "vitest": "^5.0.0"
+  }
 }

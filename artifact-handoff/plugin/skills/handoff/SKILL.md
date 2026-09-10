@@ -2,9 +2,9 @@
 name: handoff
 description: Create and register a compact, durable continuation handoff for a later OpenHands conversation. Use when the user asks for a handoff, continuation notes, or a summary for the next agent.
 triggers:
-- /handoff
-- handoff
-- continuation notes
+  - /handoff
+  - handoff
+  - continuation notes
 ---
 
 # /handoff

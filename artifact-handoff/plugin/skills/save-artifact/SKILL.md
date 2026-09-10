@@ -2,9 +2,9 @@
 name: save-artifact
 description: Register an existing durable SDLC output as a bounded snapshot or a non-copying reference. Use when the user asks to save, register, catalog, or hand off a plan, PRD, report, specification, ADR, or test result.
 triggers:
-- /save-artifact
-- save artifact
-- register artifact
+  - /save-artifact
+  - save artifact
+  - register artifact
 ---
 
 # /save-artifact
