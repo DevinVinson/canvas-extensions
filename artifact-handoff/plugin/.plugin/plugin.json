@@ -1,0 +1,8 @@
+{
+  "name": "artifact-handoff",
+  "version": "1.0.0",
+  "description": "Register durable handoffs, prototypes, and SDLC artifacts for the Artifact Handoff Canvas App.",
+  "author": { "name": "Canvas Apps contributors" },
+  "license": "MIT",
+  "keywords": ["artifact", "handoff", "prototype", "sdlc"]
+}

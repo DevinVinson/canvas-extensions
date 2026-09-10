@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "name": "artifact-handoff",
+  "display_name": "Artifact Handoff",
+  "version": "1.0.0",
+  "description": "Browse durable agent handoffs, prototypes, and SDLC artifacts.",
+  "entrypoint": "extension.js",
+  "contributes": { "pages": [{ "id": "artifacts", "title": "Artifacts", "path": "/artifacts", "nav_label": "Artifacts", "description": "Browse and reuse validated durable artifacts." }] }
+}
