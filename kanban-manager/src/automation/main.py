@@ -461,32 +461,14 @@ def conv_statuses(tickets: list[dict]) -> dict[str, str]:
 # ------------------------------------------------------------- manager kickoff
 
 def model_selection_instructions() -> str:
-    """Manager-prompt section listing the agent server's LLM profiles.
-
-    Degrades to a self-serve instruction if the agent server is unreachable at
-    prompt-build time so the manager can still pick a model.
-    """
-    try:
-        data = vibestore.llm_profiles()
-        active = data.get("active_profile")
-        lines = "\n".join(
-            f"- `{p['name']}` → {p['model']}"
-            + (" **(active default)**" if p["name"] == active else "")
-            for p in data["profiles"]
-        )
-        if not lines:
-            raise ValueError("no profiles")
-    except Exception:
-        lines = f"- run `{VIBECTL} profiles` for the current list (name → model)"
-    return f"""## Model selection for workers
-Available LLM profiles on the agent server:
-{lines}
-Choose a model PER TASK and pass it as `--profile <name>` when dispatching (omit it to use the active default). Judge by the ticket's difficulty:
-- strongest/most expensive model → gnarly work: architecture, tricky debugging, large refactors, vague requirements
-- default → routine feature work and bug fixes
-- cheapest/fastest → trivial chores: copy tweaks, docs, config, one-liners
-Passing `--profile` to a follow-up switches that EXISTING conversation's model first — escalate a stuck worker to a stronger model this way.
-**The user's choice wins**: a ticket with a non-null `requested_model` runs on that profile, and passing `--ticket <ticket_id>` applies it for you — your `--profile` is ignored for that ticket. A null `requested_model` is "manager's choice": you pick, as above. Each ticket also carries `budget_usd`, the spend cap its worker gets; a worker that hits it is paused automatically and its card is moved to needs_input, so do not restart it without a new instruction from the user."""
+    """Manager-prompt policy for choosing worker LLM profiles."""
+    return """## Model selection for workers
+For manager-dispatched work, use only these GPT profiles and always pass the matching `--profile`:
+- `gpt-6-astra` → high effort: architecture, tricky debugging, large refactors, vague requirements
+- `gpt-5.6-sol` → medium/default effort: routine feature work and bug fixes
+- `gpt-5.6-terra` → low effort: trivial chores, copy tweaks, docs, config, and one-liners
+Do not select or recommend Anthropic profiles for manager-dispatched work. Passing `--profile` to a follow-up switches that EXISTING conversation's model first — escalate a stuck worker to a stronger GPT tier this way.
+**The user's choice wins**: a ticket with a non-null `requested_model` runs on that profile, and passing `--ticket <ticket_id>` applies it for you — your `--profile` is ignored for that ticket. A null `requested_model` is "manager's choice": you pick from the GPT tiers above. Each ticket also carries `budget_usd`, the spend cap its worker gets; a worker that hits it is paused automatically and its card is moved to needs_input, so do not restart it without a new instruction from the user."""
 
 
 def build_manager_prompt(ws: dict, tickets: list[dict]) -> str:
