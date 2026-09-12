@@ -222,6 +222,7 @@ var BOARD_MARKUP = `
   <div class="topbar-controls">
     <div class="control control-workspace">
       <select id="workspace-select" aria-label="Workspace"><option value="">Choose a workspace</option></select>
+      <div id="workspace-indicators" class="workspace-indicators" aria-label="Projects with unfinished cards"></div>
     </div>
     <div class="control control-accent" id="ctl-accent" hidden>
       <button type="button" id="accent-toggle" class="ghost-btn accent-btn"
@@ -425,6 +426,7 @@ var BOARD_MARKUP = `
 var STORE_SUBPATH = ".openhands/vibe-manager";
 var STATUSES = ["pending", "in_progress", "needs_input", "finished"];
 var VERIFIED = "verified";
+var UNFINISHED_STATUSES = /* @__PURE__ */ new Set(["pending", "in_progress", "needs_input"]);
 var DEFAULT_ACCENT = "ember";
 var DEFAULT_THEME = "dark";
 var DEFAULT_BUDGET = 10;
@@ -677,6 +679,15 @@ var Store = class {
     }
     const merged = [...available.filter((a) => !seen.has(a.path))];
     return { available: merged, selected };
+  }
+  async unfinishedCounts(workspaces) {
+    const boards = await Promise.all(workspaces.map((workspace) => this.readBoard(workspace.id)));
+    return Object.fromEntries(workspaces.map((workspace, position) => [
+      workspace.id,
+      boards[position].tickets.filter(
+        (ticket) => UNFINISHED_STATUSES.has(ticket.status)
+      ).length
+    ]));
   }
   async selectWorkspace(path) {
     const existing = (await this.readIndex()).workspaces.find((w) => w.path === path);
@@ -1658,6 +1669,23 @@ var EXTENSION_CSS = true ? `.vibe-ext { --vibe-rem: 1.2rem; }
 .vibe-ext input[type=number] { width: 88px; font-family: var(--mono); }
 .vibe-ext select:hover, .vibe-ext input[type=number]:hover { border-color: var(--text-faint); }
 
+.vibe-ext .workspace-indicators { display: flex; align-items: center; gap: var(--s2); }
+.vibe-ext .workspace-indicator {
+  width: calc(1.625 * var(--vibe-rem)); height: calc(1.625 * var(--vibe-rem)); flex: none; padding: 0;
+  border: 1px solid color-mix(in srgb, var(--accent) 65%, var(--line));
+  border-radius: 50%; background: color-mix(in srgb, var(--accent) 18%, var(--field));
+  color: var(--text); font-family: var(--mono); font-size: calc(0.6875 * var(--vibe-rem));
+  font-weight: 700; line-height: 1; cursor: pointer;
+  transition: transform .12s, background .12s, border-color .12s;
+}
+.vibe-ext .workspace-indicator:hover, .vibe-ext .workspace-indicator:focus-visible {
+  transform: translateY(-1px); background: color-mix(in srgb, var(--accent) 32%, var(--field));
+  border-color: var(--accent); outline: none;
+}
+.vibe-ext .workspace-indicator[aria-current="page"] {
+  background: var(--accent); color: var(--btn-text); border-color: var(--accent);
+}
+
 .vibe-ext .seg {
   display: inline-flex; border: 1px solid var(--line);
   border-radius: var(--r-md); overflow: hidden; background: var(--field);
@@ -2192,8 +2220,9 @@ var EXTENSION_CSS = true ? `.vibe-ext { --vibe-rem: 1.2rem; }
   .vibe-ext .col { min-height: 0; }
   .vibe-ext .topbar { padding: var(--s3) var(--s4); gap: var(--s3); }
   .vibe-ext .topbar-controls { gap: var(--s3); width: 100%; }
-  .vibe-ext .control-workspace { flex: 1; }
-  .vibe-ext .control-workspace select { min-width: 0; width: 100%; }
+  .vibe-ext .control-workspace { flex: 1; min-width: 0; }
+  .vibe-ext .control-workspace select { flex: 1; min-width: 0; width: auto; }
+  .vibe-ext .workspace-indicators { flex-wrap: wrap; }
   .vibe-ext #board-wrap { padding: var(--s4) var(--s3); }
   .vibe-ext .board, .vibe-ext .board.show-verified { grid-template-columns: minmax(0, 1fr); }
   .vibe-ext .ticket-form-row { flex-direction: column; align-items: stretch; }
@@ -2433,6 +2462,7 @@ function mountBoard({ container, path, navigate, host }) {
     newTicketFiles: [],
     theme: readTheme(),
     pollTimer: null,
+    workspaceTimer: null,
     automationTimer: null,
     // manager chat: {wsId, conversationId, url, messages, cursor, status, action}
     chat: null,
@@ -2554,7 +2584,16 @@ function mountBoard({ container, path, navigate, host }) {
   async function loadWorkspaces() {
     const data = await state.store.listWorkspaces();
     if (!alive()) return;
-    state.workspaces = data;
+    const previousCounts = new Map(
+      state.workspaces.selected.map((workspace) => [workspace.id, workspace.unfinished_count])
+    );
+    state.workspaces = {
+      ...data,
+      selected: data.selected.map((workspace) => ({
+        ...workspace,
+        unfinished_count: previousCounts.get(workspace.id) || 0
+      }))
+    };
     const sel = $("#workspace-select");
     const current = sel.value;
     sel.innerHTML = '<option value="">Choose a workspace</option>';
@@ -2583,6 +2622,43 @@ function mountBoard({ container, path, navigate, host }) {
       sel.appendChild(og);
     }
     sel.value = current || readWorkspacePref();
+    renderWorkspaceIndicators();
+    refreshWorkspaceCounts();
+  }
+  async function refreshWorkspaceCounts() {
+    const workspaces = state.workspaces.selected;
+    try {
+      const counts = await state.store.unfinishedCounts(workspaces);
+      if (!alive()) return;
+      for (const workspace of state.workspaces.selected) {
+        if (workspace.id !== state.ws?.id && Object.hasOwn(counts, workspace.id)) {
+          workspace.unfinished_count = counts[workspace.id];
+        }
+      }
+      renderWorkspaceIndicators();
+    } catch (error) {
+      if (alive()) console.error(error);
+    }
+  }
+  function renderWorkspaceIndicators() {
+    const wrap = $("#workspace-indicators");
+    wrap.replaceChildren();
+    for (const workspace of state.workspaces.selected) {
+      const count = Number(workspace.unfinished_count) || 0;
+      if (!count) continue;
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "workspace-indicator";
+      button.dataset.path = workspace.path;
+      button.title = workspace.name;
+      button.textContent = String(count);
+      button.setAttribute(
+        "aria-label",
+        `${workspace.name}: ${count} unfinished ${count === 1 ? "card" : "cards"}`
+      );
+      if (workspace.id === state.ws?.id) button.setAttribute("aria-current", "page");
+      wrap.appendChild(button);
+    }
   }
   function readWorkspacePref() {
     try {
@@ -2646,6 +2722,15 @@ function mountBoard({ container, path, navigate, host }) {
       state.ws = data.workspace;
       adoptWorkspacePrefs();
       state.tickets = state.live.decorate(data.tickets, "");
+      const listed = state.workspaces.selected.find(
+        (workspace) => workspace.id === state.ws.id
+      );
+      if (listed) {
+        listed.unfinished_count = state.tickets.filter(
+          (ticket) => UNFINISHED_STATUSES.has(ticket.status)
+        ).length;
+      }
+      renderWorkspaceIndicators();
       renderBoard();
       renderSettings();
       if (state.drawerTicketId) renderDrawer();
@@ -2666,6 +2751,20 @@ function mountBoard({ container, path, navigate, host }) {
     state.automationTimer = null;
   }
   cleanups.push(stopPolling);
+  function startWorkspacePolling() {
+    clearInterval(state.workspaceTimer);
+    state.workspaceTimer = setInterval(
+      () => loadWorkspaces().catch((error) => {
+        if (alive()) console.error(error);
+      }),
+      3e4
+    );
+  }
+  function stopWorkspacePolling() {
+    clearInterval(state.workspaceTimer);
+    state.workspaceTimer = null;
+  }
+  cleanups.push(stopWorkspacePolling);
   async function refreshAutomation() {
     if (!state.ws) return;
     try {
@@ -3472,6 +3571,10 @@ ${TRIGGER_HINT}`;
   function wire() {
     on($("#api-retry"), "click", () => connect());
     on($("#workspace-select"), "change", (e) => selectWorkspace(e.target.value));
+    on($("#workspace-indicators"), "click", (e) => {
+      const button = e.target.closest(".workspace-indicator");
+      if (button) selectWorkspace(button.dataset.path);
+    });
     on($("#new-ticket-form"), "submit", (e) => {
       e.preventDefault();
       submitTicket();
@@ -3564,6 +3667,7 @@ ${TRIGGER_HINT}`;
   async function start() {
     await loadWorkspaces();
     if (!alive()) return;
+    startWorkspacePolling();
     const routeName = workspaceNameFromRoute(path);
     const routePath = routeName ? workspacePathFromName(routeName) : null;
     const saved = readWorkspacePref();
