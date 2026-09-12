@@ -970,6 +970,62 @@ describe("workspace picker", () => {
     assert.equal(option.textContent, "demo");
     dispose();
   });
+
+  it("links every project with unfinished cards beside the picker", async () => {
+    dom.store.clear();
+    const home = "/home/tester";
+    const root = `${home}/.openhands/vibe-manager`;
+    const workspaces = [
+      { id: "w-alpha", name: "Alpha", path: "/git/alpha", max_concurrent: 2 },
+      { id: "w-beta", name: "Beta", path: "/git/beta", max_concurrent: 2 },
+      { id: "w-done", name: "Done", path: "/git/done", max_concurrent: 2 },
+    ];
+    const ticket = (id, status) => ({
+      id, status, entries: [{ id: `e-${id}`, author: "user", body: id, created_at: 1 }],
+    });
+    const files = {
+      [`${root}/index.json`]: { workspaces },
+      [`${root}/workspaces/w-alpha/board.json`]: {
+        tickets: [ticket("pending", "pending"), ticket("working", "in_progress"),
+          ticket("finished", "finished")],
+      },
+      [`${root}/workspaces/w-beta/board.json`]: {
+        tickets: [ticket("waiting", "needs_input"), ticket("verified", "verified")],
+      },
+      [`${root}/workspaces/w-done/board.json`]: {
+        tickets: [ticket("done", "finished"), ticket("checked", "verified")],
+      },
+    };
+    const { host } = hostWithStore({ home, files });
+    const navigated = [];
+    const container = makeContainer();
+    const dispose = mountBoard({
+      container, path: "", navigate: (target) => navigated.push(target), host,
+    });
+
+    await waitFor(() => container.querySelectorAll(".workspace-indicator").length === 2);
+    const indicators = [...container.querySelectorAll(".workspace-indicator")];
+    assert.deepEqual(indicators.map((el) => el.textContent), ["2", "1"]);
+    assert.deepEqual(indicators.map((el) => el.getAttribute("title")), ["Alpha", "Beta"]);
+    assert.deepEqual(
+      indicators.map((el) => el.getAttribute("aria-label")),
+      ["Alpha: 2 unfinished cards", "Beta: 1 unfinished card"],
+    );
+    assert.equal(
+      container.querySelector("#workspace-indicators").previousElementSibling.id,
+      "workspace-select",
+      "indicators sit immediately beside the project picker",
+    );
+
+    indicators[1].dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+    await waitFor(() => navigated.includes("/extensions/kanban-manager/board/Beta"));
+    assert.equal(container.querySelector("#workspace-select").value, "/git/beta");
+    await waitFor(() =>
+      container.querySelector('.workspace-indicator[data-path="/git/beta"]')
+        ?.getAttribute("aria-current") === "page",
+    );
+    dispose();
+  });
 });
 
 describe("worker activity indicator", () => {
